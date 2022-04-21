@@ -1,3 +1,3 @@
 # NFTeaze
 
-<img src="https://dirty.finance.com/images/nfteaze_logo.jpg"/>
+<img src="https://dirty.finance/images/nfteaze_logo.jpg"/>
