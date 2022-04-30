@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Unknown
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 pragma solidity ^0.8.9;
 
@@ -219,7 +219,6 @@ interface IDividendDistributor {
     function changeImpoundTimelimit(uint256 _timelimit) external;
     function changeDistribGas(uint256 _walletGas, uint256 _reinvestGas) external;
     function rescueETHFromContract() external;
-    function donate(address shareholder, address charity, uint256 percent) external;
 }
 
 contract DividendDistributor is IDividendDistributor {
@@ -266,7 +265,7 @@ contract DividendDistributor is IDividendDistributor {
 
     uint256 public impoundTimelimit = 2592000; //1 month default
     uint256 public minDistribution = 1000000* (10 ** 9); //0.001
-    uint256 public minHoldAmountForRewards = 25000000 * (10**9); // Must hold 25 million tokens to receive rewards
+    uint256 public minHoldAmountForRewards = 2500000000 * (10**9); // Must hold 2.5 trillion tokens to receive rewards
 
     uint256 currentIndex;
 
@@ -426,40 +425,6 @@ contract DividendDistributor is IDividendDistributor {
             return; 
         }
     }
-
-     //withdraw dividends
-     function donate(address shareholder, address charityAddress, uint256 percent) external override onlyToken {
-
-         require(percent >= 25 && percent <= 100, "Percent of donation is outside of parameters");
-        
-         uint256 fullamount = shares[shareholder].unpaidDividends.add(getUnpaidEarnings(shareholder));
-        
-         uint256 netamount = fullamount.mul(percent).div(100);
-        
-        if(netamount > 0){
-            
-            netamount = netamount.sub(1); //this is so we aren't short on dust in the holding wallet
-
-            totalDistributed = totalDistributed.add(netamount);
-
-            (bool successShareholder, /* bytes memory data */) = payable(charityAddress).call{value: netamount, gas: distribWalletGas}("");
-            require(successShareholder, "Shareholder rejected BNB transfer");
-            shareholderClaims[shareholder] = block.timestamp;
-            
-            shares[shareholder].unpaidDividends = fullamount.sub(netamount); 
-            shares[shareholder].totalExcluded = getCumulativeDividends(shares[shareholder].amount);
-
-            addDonator(shareholder);
-            shareholderDonated[shareholder] = shareholderDonated[shareholder].add(netamount);
-
-            totalDonated = totalDonated.add(netamount);
-            netDividends = netDividends.sub(netamount);          
-
-
-        } else {
-            return; 
-        }
-    }
     
     function getUnpaidDividends(address shareholder) public view returns (uint256 unpaidDividends) {
         return shares[shareholder].unpaidDividends;
@@ -579,16 +544,6 @@ contract DividendDistributor is IDividendDistributor {
         shareholderAdded[shareholder] = false;
     }
 
-    function addDonator(address shareholder) internal {
-        if (donatorAdded[shareholder]) {
-            return;
-        } else {
-            donators.push(shareholder);
-            donatorAdded[shareholder] = true;
-        }
-        
-    }
-    
     function setDividendToken(address _dividendToken) external override onlyToken {
         dividendToken = IBEP20(_dividendToken);
         emit DividendTokenUpdate(_dividendToken);
@@ -698,20 +653,9 @@ contract DividendDistributor is IDividendDistributor {
         return minDistribution;
     }
 
-    function getDonationLeaders() external view returns (address[] memory, uint256[] memory) {
-        uint limit = donators.length;
-        address[] memory list = new address[](limit);
-        uint256[] memory sent = new uint256[](limit);
-        for (uint start = 0; start < limit; ++start) {
-            list[start] = donators[start];
-            sent[start] = shareholderDonated[donators[start]];
-        }
-
-        return (list, sent);
-    }
 }
 
-contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
+contract CRYPTeaze is IBEP20, Auth, ReentrancyGuard {
     using SafeMath for uint256;
 
     address WETH;
@@ -720,11 +664,11 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
 
     IWETH WETHrouter;
     
-    string constant _name = "NFTeaze";
+    string constant _name = "CRYPTeaze";
     string constant _symbol = "Teaze";
     uint8 constant _decimals = 9;
 
-    uint256 _totalSupply = 1000000000000 * (10 ** _decimals);
+    uint256 _totalSupply = 100000000000000 * (10 ** _decimals);
     uint256 public _maxTxAmountBuy = _totalSupply;
     uint256 public _maxTxAmountSell = _totalSupply; 
     uint256 public _maxWalletToken = _totalSupply; 
@@ -749,25 +693,23 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     mapping (address => bool) public isBot;
 
     uint256 initialBlockLimit = 1;
-    
-    uint256 public burnRatio = 142;
-    uint256 public stakepoolRatio = 142;
-    uint256 public taxRatio = 200;
 
-    uint256 public totalFee = 70; //(7%)
+    uint256 public totalFee = 100; //(10%)
+    uint256 public buybackFee = 300;
+    uint256 public stakepoolFee = 200;
+    uint256 public nftmarketingFee = 300;
+    uint256 public feeDenominator = 1000;
     uint256 discountOffset = 1;
     uint256 public partnerFeeLimiter = 50;
-    uint256 public feeDenominator = 1000;
     uint256 public WETHaddedToPool;
 
-    address public charityWallet;
-    address public regenWallet;
-    address public nftRewardWallet;
+    address public buybackWallet;
+    address public nftMarketingWallet;
     address public stakePoolWallet;
 
-    uint256 public totalCharity;
-    uint256 public totalAdmin;
-    uint256 public totalNFTrewards;
+    uint256 public totalBuyBack;
+    uint256 public totalReflect;
+    uint256 public totalNFTmarketing;
     uint256 public totalStakepool;
 
     IDEXRouter public router;
@@ -778,13 +720,13 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     uint256 public launchedAt;
 
     bool public swapEnabled = false;
-    bool public stakePoolActive = false;
-    bool public nftPoolActive = false;
+    bool public stakeWalletActive = true;
+    bool public nftWalletActive = true;
+    bool public buybackWalletActive = true;
     bool public distributorDeposit = true;
     bool public teamWalletDeposit = true;
-    bool public addToLiquid = true;
     bool public enablePartners = false;
-    bool public enableOracle = false;
+    bool public enableOracle = true;
     bool public airdropEnabled = false;
     bool public launchEnabled = false;
 
@@ -795,15 +737,17 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     uint256 walletGas = 40000;
     uint256 depositGas = 350000;
 
-    uint256 private swapThreshold = 100000000000000; //100k tokens
+    uint256 public swapThreshold = 10000000000000000; //10M tokens
     
     modifier swapping() { inSwap = true; _; inSwap = false; }
 
     constructor () Auth(msg.sender) {
         
-        router = IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); 
+       // router = IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E);  pancake v2
 
-        oracle = IOracle(0x2E7bC3122009E9d6487a9b62465C5Ecc5466E81e);
+        router = IDEXRouter(0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0);  //test pancake router
+
+        oracle = IOracle(0xF69F9bCe97D2d4dDb680642cf0f8Ff09d3E79f39);
         
         address _presaler = msg.sender;
             
@@ -823,13 +767,13 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
         isDividendExempt[address(this)] = true;
         isDividendExempt[DEAD] = true;
 
-        charityWallet = 0xDcd236b4C77711BE7e90bC2b57Dea812330165B3;
-        regenWallet = 0xC475d33a760c3e0325A33C3abA706c135c456C29;
-        nftRewardWallet = 0x70117981e4C9fA0309a9BC83412305281dB5Af8B;
-        stakePoolWallet = 0x70117981e4C9fA0309a9BC83412305281dB5Af8B;
+        buybackWallet = 0x697F1cEF29E55d547313e814EC804B45e5ce0a2E;
+        nftMarketingWallet = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4;
+        stakePoolWallet = 0x1fCFa721c1AcA1c97AE8C4254E71b579C1dD3139;
 
+        isFeeExempt[buybackWallet] = true;
+        isFeeExempt[nftMarketingWallet] = true;
         isFeeExempt[stakePoolWallet] = true;
-        isDividendExempt[stakePoolWallet] = true;
 
         _balances[_presaler] = _totalSupply;
         emit Transfer(address(0), _presaler, _totalSupply);
@@ -997,40 +941,12 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     function swapBack() internal swapping {
 
         uint256 amountToSwap = IBEP20(address(this)).balanceOf(address(this));
-        uint256 burnAmount = amountToSwap.mul(burnRatio).div(feeDenominator);
-
-        IBEP20(address(this)).transfer(address(DEAD), burnAmount);
-
-        if (stakePoolActive) {  
-             
-            uint256 stakePoolAmount = amountToSwap.mul(stakepoolRatio).div(feeDenominator);
-
-            amountToSwap = amountToSwap.sub(stakePoolAmount);
-
-            IBEP20(address(this)).transfer(address(stakePoolWallet), stakePoolAmount);
-
-            totalStakepool = totalStakepool.add(stakePoolAmount);
-
-            amountToSwap = amountToSwap.sub(burnAmount);
-
-        } else {
-            amountToSwap = amountToSwap.sub(burnAmount);
-        }
 
         address[] memory path = new address[](2);
         path[0] = address(this);
         path[1] = WETH;
 
         uint256 balanceBefore = address(this).balance;
-
-        //We want to put any built up WBNB back into the pool 
-        if (addToLiquid) {
-            uint256 balance = IWETH(WETH).balanceOf(address(this));
-            if (balance > 0) {
-                IWETH(WETH).transfer(pair, balance);
-                WETHaddedToPool = WETHaddedToPool.add(balance);
-            }
-        }
 
         //Exchange the built up tokens
         router.swapExactTokensForETHSupportingFeeOnTransferTokens(
@@ -1043,27 +959,53 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
 
         //Calculate the distribution
         uint256 amountBNB = address(this).balance.sub(balanceBefore);
-
-        uint256 taxSplit = amountBNB.mul(taxRatio).div(feeDenominator);
-        uint256 amountBNBcharity = taxSplit;
-        uint256 amountBNBregen = taxSplit;
-        uint256 amountBNBbuyback = taxSplit;
         uint256 amountBNBReflection;
-        uint256 amountBNBnft;
 
-        if (nftPoolActive) {
-            amountBNBnft = taxSplit;
-            amountBNBReflection = amountBNB.sub(amountBNBcharity).sub(amountBNBbuyback).sub(amountBNBregen).sub(amountBNBnft);
+        //Deposit to the team wallets
+        if (teamWalletDeposit) {
 
-            (bool successTeam3, /* bytes memory data */) = payable(nftRewardWallet).call{value: amountBNBnft, gas: walletGas}("");
-            require(successTeam3, "NFT reward wallet rejected BNB transfer");
+        uint256 amountBNBstake = 0;
+        uint256 amountBNBbuyback = 0;
+        uint256 amountBNBnft = 0;
 
-            totalNFTrewards = totalNFTrewards.add(amountBNBnft);
+        uint256 amountTotatBNBFee;
 
-        } else {
+            if (buybackWalletActive) {
+                amountBNBbuyback = amountBNB.mul(buybackFee).div(feeDenominator);
 
-            amountBNBReflection = amountBNB.sub(amountBNBcharity).sub(amountBNBbuyback).sub(amountBNBregen);
-        }
+                (bool successTeam1, /* bytes memory data */) = payable(buybackWallet).call{value: amountBNBbuyback, gas: walletGas}("");
+                require(successTeam1, "Buyback wallet rejected BNB transfer");
+
+                totalBuyBack = totalBuyBack.add(amountBNBbuyback);
+            }
+                        
+            if (nftWalletActive) {
+                amountBNBnft = amountBNB.mul(nftmarketingFee).div(feeDenominator);
+
+                (bool successTeam3, /* bytes memory data */) = payable(nftMarketingWallet).call{value: amountBNBnft, gas: walletGas}("");
+                require(successTeam3, "NFT marketing wallet rejected BNB transfer");
+
+                totalNFTmarketing = totalNFTmarketing.add(amountBNBnft);
+            } 
+
+            if (stakeWalletActive) {
+                amountBNBstake = amountBNB.mul(stakepoolFee).div(feeDenominator);
+
+                (bool successTeam4, /* bytes memory data */) = payable(stakePoolWallet).call{value: amountBNBstake, gas: walletGas}("");
+                require(successTeam4, "Staking pool wallet rejected BNB transfer");
+
+                totalStakepool = totalStakepool.add(amountBNBstake);
+            } 
+            
+            amountTotatBNBFee = amountTotatBNBFee.add(amountBNBstake).add(amountBNBbuyback).add(amountBNBnft);
+            amountBNBReflection = amountBNB.sub(amountTotatBNBFee); 
+            totalReflect = totalReflect.add(amountBNBReflection);
+        
+        }  else {
+
+            amountBNBReflection = amountBNB;
+            totalReflect = totalReflect.add(amountBNBReflection);
+        } 
         
         //Deposit into the distributor
         if (distributorDeposit) {
@@ -1071,23 +1013,6 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
             try distributor.deposit{value: amountBNBReflection}() {} catch {}
         }
         
-        //Deposit to the team wallets
-        if (teamWalletDeposit) {
-        (bool successTeam1, /* bytes memory data */) = payable(charityWallet).call{value: amountBNBcharity, gas: walletGas}("");
-        require(successTeam1, "Charity wallet rejected BNB transfer");
-
-        totalCharity = totalCharity.add(amountBNBcharity);
-
-        (bool successTeam2, /* bytes memory data */) = payable(regenWallet).call{value: amountBNBregen, gas: walletGas}("");
-        require(successTeam2, "Admin wallet rejected BNB transfer");
-
-        totalAdmin = totalAdmin.add(amountBNBregen);
-        
-        }
-        
-        //Convert the buyback amount to WBNB and hold until the next qualifying sell
-        IWETH(WETH).deposit{value : amountBNBbuyback}();
-
     }
 
     function launched() internal view returns (bool) {
@@ -1150,19 +1075,25 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
         totalFee = _totalFee;
         
     }
+
+    function setTaxes (uint256 _buybackFee, uint256 _nftmarketingFee, uint256 _stakepoolFee) external onlyOwner {
+
+        require(totalFee >= _buybackFee.add(_nftmarketingFee).add(_stakepoolFee), "Total taxes must not exceen total fee");
+
+        buybackFee = _buybackFee;
+        nftmarketingFee = _nftmarketingFee;
+        stakepoolFee = _stakepoolFee;
+    }
     
-    function setFeeReceivers(address _charityWallet, address _regenWallet, address _nftRewardWallet, address _stakePoolWallet) external onlyOwner {
-        require(_charityWallet != ZERO, "Charity wallet must not be zero address");
-        require(_regenWallet != ZERO, "Admin wallet must not be zero address");
-        require(_nftRewardWallet != ZERO, "NFT reward wallet must not be zero address");
+    function setFeeReceivers(address _buybackWallet, address _nftMarketingWallet, address _stakePoolWallet) external onlyOwner {
+        require(_buybackWallet != ZERO, "Charity wallet must not be zero address");
+        require(_nftMarketingWallet != ZERO, "NFT reward wallet must not be zero address");
         require(_stakePoolWallet != ZERO, "Stakepool wallet must not be zero address");
-         require(_charityWallet != DEAD, "Charity wallet must not be dead address");
-        require(_regenWallet != DEAD, "Admin wallet must not be dead address");
-        require(_nftRewardWallet != DEAD, "NFT reward wallet must not be dead address");
+         require(_buybackWallet != DEAD, "Charity wallet must not be dead address");
+        require(_nftMarketingWallet != DEAD, "NFT reward wallet must not be dead address");
         require(_stakePoolWallet != DEAD, "Stakepool wallet must not be dead address");
-        charityWallet = _charityWallet;
-        nftRewardWallet = _nftRewardWallet;
-        regenWallet = _regenWallet;
+        buybackWallet = _buybackWallet;
+        nftMarketingWallet = _nftMarketingWallet;
         stakePoolWallet = _stakePoolWallet;
 
     }
@@ -1184,12 +1115,9 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
         teamWalletDeposit = _status;
     }
 
-    function setAddToLiquid(bool _status) external onlyOwner {
-        addToLiquid = _status;
-    }
 
-    function viewTeamWalletInfo() public view returns (uint256 charityDivs, uint256 regenDivs, uint256 nftDivs, uint256 stakeDivs) {
-        return (totalCharity, totalAdmin, totalNFTrewards, totalStakepool);
+    function viewTeamWalletInfo() public view returns (uint256 reflectDivs, uint256 buybackDivs, uint256 nftDivs, uint256 stakeDivs) {
+        return (totalReflect, totalBuyBack, totalNFTmarketing, totalStakepool);
     }
 
     // This will allow owner to rescue BNB sent by mistake directly to the contract
@@ -1251,26 +1179,7 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     function Reinvest(uint256 _percent, uint256 _amountOutMin) external nonReentrant {
         distributor.reinvestDividend(msg.sender, _percent, _amountOutMin);
     }
-
-    function Donate(uint256 _percent) external nonReentrant {
-        distributor.donate(msg.sender, charityWallet, _percent);
-    }
-
-    function setburnRatio(uint256 _amount) external onlyOwner {
-        require(_amount <= taxRatio.div(2), "burn ratio cannot be more than 50 percent of total tax");
-        burnRatio = _amount;
-    } 
-
-    function setstakepoolRatio(uint256 _amount) external onlyOwner {
-        require(_amount <= taxRatio.div(2), "stakepool ratio cannot be more than 50 percent of total tax");
-        stakepoolRatio = _amount;
-    } 
-
-    function settaxRatio(uint256 _amount) external onlyOwner {
-        require(_amount <= feeDenominator.div(4), "tax ratio cannot be more than 250 (25%)");
-        taxRatio = _amount;
-    }
-
+    
     function ChangeMinHold(uint256 _amount, uint256 _gas) external onlyOwner swapping {
         distributor.changeMinHold(_amount, _gas);
     }
@@ -1315,11 +1224,11 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     }
 
     function setStakePoolActive(bool _status) external onlyOwner {
-        stakePoolActive = _status; 
+        stakeWalletActive = _status; 
     }
 
     function setNFTPoolActive(bool _status) external onlyOwner {
-        nftPoolActive = _status; 
+        nftWalletActive = _status; 
     }
 
     function changeContractGas(uint256 _distributorgas, uint256 _walletgas) external onlyOwner {
@@ -1459,10 +1368,6 @@ contract NFTeaze is IBEP20, Auth, ReentrancyGuard {
     function registerShares() external nonReentrant {
         uint256 balance = IBEP20(address(this)).balanceOf(msg.sender);
         distributor.setShare(msg.sender,balance);
-    }
-
-    function getDonationLeaders() external view returns (address[] memory, uint256[] memory) {
-       return distributor.getDonationLeaders();
     }
 
     function setDiscountOffset(uint256 _offset) external onlyOwner {
