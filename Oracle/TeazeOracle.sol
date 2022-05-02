@@ -118,6 +118,8 @@ contract TeazeOracle is Ownable {
         LP = IPancakePair(0xe9DDB9847A7a6801d458a591e9C61D2a8a796874);
     }
 
+    receive() external payable {}
+
     /**
      * Returns the latest price
      */
@@ -190,5 +192,17 @@ contract TeazeOracle is Ownable {
     
     function changeSetPrice(uint256 _amount) external onlyOwner {
       setPrice = _amount;
+    }
+
+    // This will allow to rescue ETH sent by mistake directly to the contract
+    function rescueBNBFromContract() external onlyOwner {
+        address payable _owner = payable(_msgSender());
+        _owner.transfer(address(this).balance);
+    }
+
+    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
+    function transferBEP20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+       
+        IBEP20(_tokenAddr).transfer(_to, _amount);
     }
 }
