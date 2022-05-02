@@ -3,47 +3,7 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-
-/**
- * Standard SafeMath, stripped down to just add/sub/mul/div
- */
-library SafeMath {
-    function add(uint256 a, uint256 b) internal pure returns (uint256) {
-        uint256 c = a + b;
-        require(c >= a, "SafeMath: addition overflow");
-
-        return c;
-    }
-    function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-        return sub(a, b, "SafeMath: subtraction overflow");
-    }
-    function sub(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-        require(b <= a, errorMessage);
-        uint256 c = a - b;
-
-        return c;
-    }
-    function mul(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (a == 0) {
-            return 0;
-        }
-
-        uint256 c = a * b;
-        require(c / a == b, "SafeMath: multiplication overflow");
-
-        return c;
-    }
-    function div(uint256 a, uint256 b) internal pure returns (uint256) {
-        return div(a, b, "SafeMath: division by zero");
-    }
-    function div(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-        // Solidity only automatically asserts when dividing by 0
-        require(b > 0, errorMessage);
-        uint256 c = a / b;
-
-        return c;
-    }
-}
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 interface IBEP20 {
     function totalSupply() external view returns (uint256);
@@ -151,11 +111,11 @@ contract TeazeOracle is Ownable {
     AggregatorV3Interface internal priceFeed;
     IPancakePair public LP;
 
-    uint256 setPrice = 10;
+    uint256 setPrice = 1;
 
     constructor() {
-        priceFeed = AggregatorV3Interface(0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE);  
-        LP = IPancakePair(0x6d3CbF7c3a4cb275F8457D1D13F5Ae07763F7920);
+        priceFeed = AggregatorV3Interface(0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526);  //bscmainet bnb/usd 0x0567f2323251f0aab15c8dfb1967e4e8a7d42aee
+        LP = IPancakePair(0xe9DDB9847A7a6801d458a591e9C61D2a8a796874);
     }
 
     /**
@@ -182,10 +142,10 @@ contract TeazeOracle is Ownable {
       uint256 bnbusdprice = getLatestPrice();
       bnbusdprice = bnbusdprice.mul(10); //make bnb usd price have 9 decimals
       
-      (uint256 pooledTEAZE, uint256 pooledBNB) = getReserves();
+      (uint256 pooledBNB, uint256 pooledTEAZE) = getReserves();
 
-      IBEP20 token0 = IBEP20(LP.token0()); //TEAZE
-      IBEP20 token1 = IBEP20(LP.token1()); //BNB  
+      IBEP20 token0 = IBEP20(LP.token0()); //BNB
+      IBEP20 token1 = IBEP20(LP.token1()); //TEAZE  
 
       pooledBNB = pooledBNB.div(10**token0.decimals()); //make pooled bnb have 9 decimals
 
@@ -198,19 +158,25 @@ contract TeazeOracle is Ownable {
     //for the token contract dynamic discount
     function getdiscount(uint256 amount) external view returns (uint256) {
       (uint256 bnbusd,,uint256 teazeusd) = getTeazeUSDPrice();
-      uint256 totalteazeusd = teazeusd.mul(amount);
+      uint256 teazeusdtemp;
+      if (teazeusd < setPrice) {teazeusdtemp = setPrice;} else {teazeusdtemp = teazeusd;}
+      uint256 totalteazeusd = teazeusdtemp.mul(amount);
       uint256 totalbnb = totalteazeusd.div(bnbusd);
+      if (teazeusd < setPrice) {
+        totalbnb = totalbnb.div(2);
+      }
       return totalbnb;
     }
 
-    //for the token swap bonus
+    //for the token swap bonus; input is in BNB!
     function getbnbequivalent(uint256 amount) external view returns (uint256) {
       (uint256 bnbusd,,uint256 teazeusd) = getTeazeUSDPrice();
-      uint256 tempbnbusd = amount.mul(bnbusd);
       if (teazeusd < setPrice) {
         teazeusd = setPrice;
       }
+      uint256 tempbnbusd = amount.mul(bnbusd);
       uint256 tempteaze = tempbnbusd.div(teazeusd);
+
       return tempteaze.div(10**9);
     }
 
