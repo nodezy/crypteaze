@@ -7,13 +7,6 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-/* corrections needed:
-
-way to delist NFT sale item
-fix struct issues after sale
-
-*/
-
 contract NFTMarketplace is Ownable, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
@@ -25,7 +18,7 @@ contract NFTMarketplace is Ownable, ReentrancyGuard {
     uint256 buyingFee = 0.025 ether;
     
     mapping(uint256 => MarketItem) private idToMarketItem;
-
+    
     struct MarketItem {
       uint256 tokenId;
       address payable seller;
@@ -106,7 +99,7 @@ contract NFTMarketplace is Ownable, ReentrancyGuard {
       feeTotals = feeTotals.add(listingFee);
 
       _itemsHeld.increment();
-
+      
       emit MarketItemCreated(
         tokenId,
         msg.sender,
@@ -116,17 +109,17 @@ contract NFTMarketplace is Ownable, ReentrancyGuard {
       );
     }
 
-    /* allows someone to resell a token they have purchased */
-    function resellToken(uint256 tokenId, uint256 price) external payable nonReentrant {
+    /* allows someone to remove a token they have listed */
+    function removeMarketItem(uint256 tokenId) external nonReentrant {
       require(idToMarketItem[tokenId].owner == msg.sender, "Only item owner can perform this operation");
-      require(msg.value == listingFee, "Price must be equal to listing price");
+      //require(msg.value == listingFee, "Price must be equal to listing price");
       idToMarketItem[tokenId].sold = false;
-      idToMarketItem[tokenId].price = price;
-      idToMarketItem[tokenId].seller = payable(msg.sender);
-      idToMarketItem[tokenId].owner = payable(address(this));
-      _itemsSold.decrement();
+      idToMarketItem[tokenId].price = 0;
+      idToMarketItem[tokenId].seller = payable(address(0));
+      idToMarketItem[tokenId].owner = payable(address(0));
+      _itemsHeld.decrement();
 
-      crypteazeNFT.safeTransferFrom(msg.sender, address(this), tokenId);
+      crypteazeNFT.safeTransferFrom(address(this), msg.sender, tokenId);
     }
 
     /* Creates the sale of a marketplace item */
