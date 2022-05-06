@@ -18,12 +18,63 @@ interface ITeazeNFT {
   function mint(address to, uint256 id) external;
   function getCreatorAddress(uint256 _nftid) external view returns (address);
   function getCreatorPrice(uint256 _nftid) external view returns (uint256);
+  function getCreatorSimpCashPrice(uint256 _nftid) external view returns (uint256);
   function getCreatorSplit(uint256 _nftid) external view returns (uint256);
   function getCreatorMintLimit(uint256 _nftid) external view returns (uint256);
   function getCreatorRedeemable(uint256 _nftid) external view returns (bool);
   function getCreatorPurchasable(uint256 _nftid) external view returns (bool);
   function getCreatorExists(uint256 _nftid) external view returns (bool);
   function mintedCountbyID(uint256 _id) external view returns (uint256);
+  function getPackID(uint256 _nftid) external returns (uint256);
+  function increasePurchasePrice(uint256 _nftid) external; 
+}
+
+interface IDEXRouter {
+    function factory() external pure returns (address);
+    function WETH() external pure returns (address);
+
+    function addLiquidity(
+        address tokenA,
+        address tokenB,
+        uint amountADesired,
+        uint amountBDesired,
+        uint amountAMin,
+        uint amountBMin,
+        address to,
+        uint deadline
+    ) external returns (uint amountA, uint amountB, uint liquidity);
+
+    function addLiquidityETH(
+        address token,
+        uint amountTokenDesired,
+        uint amountTokenMin,
+        uint amountETHMin,
+        address to,
+        uint deadline
+    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
+
+    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external;
+
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external payable;
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external;
 }
 
 // Allows another user(s) to change contract variables
@@ -121,8 +172,17 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     
     address public NFTAddress; //NFT contract address
     address public TeazeCashAddress; //TEAZECASH contract address
+    address public NFTmarketing; //NFT/Marketing address
 
-    IERC20 teazetoken = IERC20(0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C); //teaze token
+    address _teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
+
+    IERC20 teazetoken = IERC20(_teazetoken); 
+
+    IDEXRouter router;
+    
+    address WETH;
+
+    uint256 marketBuyGas = 450000;
 
     event Unstake(address indexed user, uint256 indexed pid);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
@@ -131,7 +191,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     constructor(
         TeazeCash _teaze,
-        uint256 _startBlock
+        uint256 _startBlock,
+        address _router
     ) {
         require(address(_teaze) != address(0), "TEAZECASH address is invalid");
         //require(_startBlock >= block.number, "startBlock is before current block");
@@ -139,6 +200,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         teazecash = _teaze;
         TeazeCashAddress = address(_teaze);
         startBlock = _startBlock;
+
+        router = _router != address(0)
+            ? IDEXRouter(_router)
+            : IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); //0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0 pcs test router
+        WETH = router.WETH();
     }
 
     receive() external payable {}
@@ -581,10 +647,15 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         TeazeCashAddress = _address;
     }
 
+    // Set NFT contract address
+     function setNFTMarketingAddress(address _address) external onlyAuthorized {
+        NFTMarketing = _address;
+    }
+
     //redeem the NFT with TEAZECASH only
     function redeem(uint256 _nftid) public nonReentrant {
     
-        uint256 creatorPrice = ITeazeNFT(NFTAddress).getCreatorPrice(_nftid);
+        uint256 creatorSimpCashPrice = ITeazeNFT(NFTAddress).getCreatorSimpCashPrice(_nftid);
         bool creatorRedeemable = ITeazeNFT(NFTAddress).getCreatorRedeemable(_nftid);
         uint256 creatorMinted = ITeazeNFT(NFTAddress).mintedCountbyID(_nftid);
         uint256 creatorMintLimit = ITeazeNFT(NFTAddress).getCreatorMintLimit(_nftid);
@@ -592,7 +663,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         require(creatorRedeemable, "This NFT is not redeemable with TeazeCash");
         require(creatorMinted < creatorMintLimit, "This NFT has reached its mint limit");
 
-        uint256 price = creatorPrice;
+        uint256 price = creatorSimpCashPrice;
 
         require(price > 0, "NFT not found");
 
@@ -621,7 +692,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     }
 
     // users can also purchase the NFT with $teaze token and the proceeds can be split between the NFT influencer/artist and the staking pool
-    function purchase(uint256 _nftid) public nonReentrant {
+    function purchase(uint256 _packid) public payable nonReentrant {
         
         address creatorAddress = ITeazeNFT(NFTAddress).getCreatorAddress(_nftid);
         uint256 creatorPrice = ITeazeNFT(NFTAddress).getCreatorPrice(_nftid);
@@ -632,18 +703,37 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         bool creatorExists = ITeazeNFT(NFTAddress).getCreatorExists(_nftid);
 
         uint256 price = creatorPrice;
-        price = price.mul(conversionRate);
+        //price = price.mul(conversionRate);
 
-        require(creatorPurchasable, "This NFT is not purchasable with Teaze tokens");
+        require(creatorPurchasable, "This NFT is not purchasable with BNB");
         require(creatorMinted < creatorMintLimit, "This NFT has reached its mint limit");
-        require(teazetoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
+        require(msg.value == price, "BNB is insufficient for purchase");
+
+        uint256 netamount = msg.value.div(2);
+
+        address[] memory path = new address[](2);
+
+            path[0] = WETH;
+            path[1] = _teazetoken;
+
+            router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:netamount, gas:marketBuyGas}(
+                0,
+                path,
+                address(this),
+                block.timestamp
+            );
+
+
         ITeazeNFT(NFTAddress).mint(_msgSender(), _nftid);
+        ITeazeNFT(NFTAddress).increasePurchasePrice(ITeazeNFT(NFTAddress).getPackID(_nftid));
 
-        distributeTeaze(_nftid, creatorAddress, price, creatorSplit, creatorExists);
+        //To do: fix distributeTeaze function to send TEAZE to stakepool and BNB (BNB is 25% to marketing, 25% to NFT lootbox pool)
 
+        //distributeTeaze(_nftid, creatorAddress, price, creatorSplit, creatorExists);
         
     }
 
+    //distribute $teaze/bnb to various places
     function distributeTeaze(uint256 _nftid, address _creator, uint256 _price, uint256 _creatorSplit, bool _creatorExists) internal {
         if (_creatorExists) { 
             uint256 creatorShare;
@@ -882,6 +972,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     }
 
-
+    function changeBuyGasLimit(uint256 _gasLimitAmount) external onlyOwner {
+        marketBuyGas = _gasLimitAmount
+    }
     
 }
