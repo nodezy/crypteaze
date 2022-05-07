@@ -75,6 +75,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         uint256 sbxprice; //SimpBux price of minting from the NFT Pack
         uint256 creatorSplit; //percent to split proceeds with creator/pool;
         uint256 mintLimit; //total amount of this NFT to mint
+        bool redeemable; //can be purchased with SimpBux
+        bool purchasable; //can be purchased with Teaze tokens
         bool exists;
     }
 
@@ -84,8 +86,6 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         uint256 packID; //ID of the 3 card pack
         uint256 mintClass; //0 = common, 1 = uncommon, 2 = rare
         uint256 mintPercent; //percent chance out of 100 for the NFT to mint
-        bool redeemable; //can be purchased with SimpBux
-        bool purchasable; //can be purchased with Teaze tokens
         bool lootboxable; //can be added to lootbox
         bool exists;
     }
@@ -97,6 +97,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     mapping(string => uint) private NFTmintedCountURI;  // Get total # minted by URI.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
+    mapping(address => mapping(uint => uint)) private userPackPurchased; //How many of each pack a certain address has minted.
 
     address public farmingContract; // Address of the associated farming contract.
     uint private minted;
@@ -105,17 +106,17 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     receive() external payable {}
 
-    function mint(address recipient, uint256 id) public nonReentrant returns (uint256) {
+    function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
 
         require(address(farmingContract) != address(0), "Farming contract address is invalid");
         require(msg.sender == address(farmingContract), "Minting not allowed outside of the farming contract");
 
-        PackInfo storage packinfo = packInfo[id];
+        PackInfo storage packinfo = packInfo[_packid];
 
-        require(PackNFTmints[id] < packinfo.mintLimit, "This NFT Pack has reached its mint limit");
+        require(PackNFTmints[_packid] < packinfo.mintLimit, "This NFT Pack has reached its mint limit");
 
         //Randomizing mint starts here
-        uint packlength = PackIDS[id].length;
+        uint packlength = PackIDS[_packid].length;
 
         require(packlength >= 3, "Not enough NFTs in this pack to mint from");
 
@@ -125,10 +126,10 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         for (uint256 x = 0; x < packlength; ++x) { //for each NFTID in the pack
 
-            NFTInfo memory tempnftinfo = nftInfo[PackIDS[id][x]]; //should be NFT info of each nft in for loop
+            NFTInfo memory tempnftinfo = nftInfo[PackIDS[_packid][x]]; //should be NFT info of each nft in for loop
 
             for(uint256 y = 0; y < tempnftinfo.mintPercent; y++) {
-                array[y] = PackIDS[id][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
+                array[y] = PackIDS[_packid][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
             }
 
         }
@@ -146,7 +147,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         _tokenIds.increment();
         
         uint256 newItemId = _tokenIds.current();
-        _mint(recipient, newItemId);
+        _mint(_recipient, newItemId);
         _setTokenURI(newItemId,nftinfo.uri);
 
         //update counters
@@ -155,7 +156,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         NFTmintedCountID[nftid] = NFTmintedCountID[nftid] + 1;
 
-        PackNFTmints[id] = PackNFTmints[id] + 1;
+        PackNFTmints[_packid] = PackNFTmints[_packid] + 1;
 
         return newItemId;
 
@@ -198,6 +199,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         require(_mintLimit > 0, "Mint limit must be greater than zero");
         require(_splitPercent >= 0 && _splitPercent <= 100, "Split is not between 0 and 100");
 
+        //To Do: Add require statement to make certain pack doesn't already exist
+
         _PackIds.increment();
 
         uint256 _packid = _PackIds.current();
@@ -237,8 +240,6 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
            nftinfo.packID = _packID;
            nftinfo.mintClass = _mintClass;
            nftinfo.mintPercent = _mintPercent;
-           nftinfo.redeemable = _redeemable;
-           nftinfo.purchasable = _purchasable;
            nftinfo.lootboxable = _lootboxable;
            nftinfo.exists = true;
 
@@ -433,10 +434,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
        nftinfo.redeemable = _redeemable;
     }
 
-    function getCreatorRedeemable(uint256 _nftid) external view returns (bool) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.redeemable;
-    }
+    
 
     // Set NFT purchasable with Teaze tokens
     function setNFTpurchasable(uint256 _nftid, bool _purchasable) public onlyAuthorized {
@@ -487,14 +485,14 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return nftID;
     }
 
-    function getPackID(uint256 _nftid) external returns (uint256) {
+    function getPackIDbyNFT(uint256 _nftid) external returns (uint256) {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.packID;
 
     }
 
-    function increasePurchasePrice(uint256 _packid) external {
+    function packPurchased(address _recipient, uint256 _packid) external {
 
         require(msg.sender == address(farmingContract), "Function call not allowed outside of the farming contract");
 
@@ -503,6 +501,51 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
        packinfo.price = packinfo.price.add(packinfo.priceStep);
 
     }
-    
+
+    function getPackPrice(uint256 _packid) public returns (uint256) {
+        PackInfo storage packinfo = packInfo[_packid];
+
+        return packinfo.price;
+    }
+
+    function getPackPriceStep(uint256 _packid) public returns (uint256) {
+        PackInfo storage packinfo = packInfo[_packid];
+
+        return packinfo.priceStep;
+    }
+
+    function getPackRedeemable(uint256 _packid) external view returns (bool) {
+        PackInfo storage packinfo = packInfo[_packid];
+        return packinfo.redeemable;
+    }
+
+    function getPackPurchasable(uint256 _packid) external view returns (bool) {
+        PackInfo storage packinfo = packInfo[_packid];
+        return packinfo.purchasable;
+    }
+
+    function getPackMintLimit(uint256 _packid) external view returns (uint256) {
+        PackInfo storage packinfo = packInfo[_packid];
+        return packinfo.mintLimit;
+    }
+
+    function getPackTotalMints(uint256 _packid) external view returns (uint256) {
+        return PackNFTmints[_packid];
+    }
+
+    function getUserPackPurchased(address _recipient, uint256 _packid) public view returns (uint256) {
+        return userPackPurchased[_recipient][_packid];
+    }
+
+    function getUserPackPrice(address _recipient, uint256 _packid) external view returns (uint256) {
+
+        uint256 purchases = getUserPackPurchased(_recipient, _packid);
+        uint256 price = getPackPrice(_packid);
+        uint256 priceStep = getPackPriceStep(_packid);
+             
+        uint256 userPrice = price.add(purchases.mul(priceStep));
+
+        return userPrice;
+    }
 }
 
