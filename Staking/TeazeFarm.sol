@@ -12,7 +12,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "./tzcash.sol";
+import "./simpbux.sol";
 
 interface ITeazeNFT {
   function mint(address to, uint256 id) external;
@@ -25,8 +25,12 @@ interface ITeazeNFT {
   function getCreatorPurchasable(uint256 _nftid) external view returns (bool);
   function getCreatorExists(uint256 _nftid) external view returns (bool);
   function mintedCountbyID(uint256 _id) external view returns (uint256);
-  function getPackID(uint256 _nftid) external returns (uint256);
-  function increasePurchasePrice(uint256 _nftid) external; 
+  function getPackIDbyNFT(uint256 _nftid) external returns (uint256);
+  function packPurchased(address _recipient, uint256 _nftid) external; 
+  function getPackPrice(uint256 _packid) external view returns (uint256);
+  function getPackMintLimit(uint256 _packid) external view returns (uint256);
+  function getPackTotalMints(uint256 _packid) external view returns (uint256);
+  function getUserPackPrice(address _recipient, uint256 _packid) external view returns (uint256);
 }
 
 interface IDEXRouter {
@@ -110,7 +114,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         uint256 amount; // How many LP tokens the user has provided.
         uint256 rewardDebt; // Reward debt. See explanation below.
         //
-        // We do some fancy math here. Basically, any point in time, the amount of TEAZECASH tokens
+        // We do some fancy math here. Basically, any point in time, the amount of SimpBux tokens
         // entitled to a user but is pending to be distributed is:
         //
         //   pending reward = (user.amount * pool.accTeazePerShare) - user.rewardDebt
@@ -125,35 +129,39 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     // Info of each pool.
     struct PoolInfo {
         IERC20 lpToken; // Address of LP token contract.
-        uint256 allocPoint; // How many allocation points assigned to this pool. TEAZECASH tokens to distribute per block.
-        uint256 lastRewardBlock; // Last block number that TEAZECASH tokens distribution occurs.
-        uint256 accTeazePerShare; // Accumulated TEAZECASH tokens per share, times 1e12. See below.
+        uint256 allocPoint; // How many allocation points assigned to this pool. SimpBux tokens to distribute per block.
+        uint256 lastRewardBlock; // Last block number that SimpBux tokens distribution occurs.
+        uint256 accTeazePerShare; // Accumulated SimpBux tokens per share, times 1e12. See below.
         uint256 runningTotal; // Total accumulation of tokens (not including reflection, pertains to pool 1 ($Teaze))
     }
 
-    TeazeCash public immutable teazecash; // The TEAZECASH ERC-20 Token.
-    uint256 private teazePerBlock; // TEAZECASH tokens distributed per block. Use getTeazePerBlock() to get the updated reward.
+    SimpBux public immutable simpbux; // The SimpBux ERC-20 Token.
+    uint256 private teazePerBlock; // SimpBux tokens distributed per block. Use getTeazePerBlock() to get the updated reward.
 
     PoolInfo[] public poolInfo; // Info of each pool.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo; // Info of each user that stakes LP tokens.
     
     uint256 public totalAllocPoint; // Total allocation points. Must be the sum of all allocation points in all pools.
-    uint256 public startBlock; // The block number when TEAZECASH token mining starts.
+    uint256 public startBlock; // The block number when SimpBux token mining starts.
 
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
     uint256 public blocksPerDay = 5000; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
     uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
-    uint256 public poolReward = 1000000000000000000000; //starting basis for poolReward (default 1k).
-    uint256 public conversionRate = 100000; //conversion rate of TEAZECASH => $teaze (default 100k).
-    bool public enableRewardWithdraw = false; //whether TEAZECASH is withdrawable from this contract (default false).
-    uint256 public minTeazeStake = 21000000000000000000000000; //min stake amount (default 21 million Teaze).
-    uint256 public maxTeazeStake = 2100000000000000000000000000; //max stake amount (default 2.1 billion Teaze).
+    uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
+    uint256 public conversionRate = 100000; //conversion rate of SimpBux => $teaze (default 100k).
+    bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
+    uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
+    uint256 public maxTeazeStake = 2000000000000000000; //max stake amount (default 2 billion Teaze).
     uint256 public minLPStake = 1000000000000000000000; //min lp stake amount (default 1000 LP tokens).
     uint256 public maxLPStake = 10000000000000000000000; //max lp stake amount (default 10,000 LP tokens).
-    uint256 public promoAmount = 200000000000000000000; //amount of TEAZECASH to give to new stakers (default 200 TEAZECASH).
-    bool public promoActive = true; //whether the promotional amount of TEAZECASH is given out to new stakers (default is True).
+    uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
+    uint256 public stakedDiscount = 50; //amount the price of a pack mint is discounted if the user is staked (default 50%). 
+    uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets (default 50%).
+    uint256 public nftMarketingSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
+    uint256 public lootboxSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
+    bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
     uint256 public rewardSegment = poolReward.mul(100).div(200); //reward segment for dynamic staking.
     uint256 public ratio; //ratio of pool0 to pool1 for dynamic staking.
     uint256 public lpalloc = 65; //starting pool allocation for LP side.
@@ -163,18 +171,20 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     mapping(address => bool) public addedLpTokens; // Used for preventing LP tokens from being added twice in add().
     mapping(uint256 => mapping(address => uint256)) public unstakeTimer; // Used to track time since unstake requested.
-    mapping(address => uint256) private userBalance; // Balance of TeazeCash for each user that survives staking/unstaking/redeeming.
-    mapping(address => bool) private promoWallet; // Whether the wallet has received promotional TEAZECASH.
-    mapping(uint256 => uint256) public totalEarnedCreator; // Total amount of $teaze token spent to creator on a particular NFT.
-    mapping(uint256 => uint256) public totalEarnedPool; // Total amount of $teaze token spent to pool on a particular NFT.
-    mapping(uint256 => uint256) public totalEarnedBurn; // Total amount of $teaze token spent to burn on a particular NFT.
+    mapping(address => uint256) private userBalance; // Balance of SimpBux for each user that survives staking/unstaking/redeeming.
+    mapping(address => bool) private promoWallet; // Whether the wallet has received promotional SimpBux.
+    uint256 public totalEarnedLoot; // Total amount of BNB sent for lootboxes.
+    uint256 public totalEarnedPool; // Total amount of BNB used to buy token before being sent to stakepool.
+    uint256 public totalEarnedNFT; // Total amount of BNB NFT creation wallet to fund new NFTs.
     mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not.
     
-    address public NFTAddress; //NFT contract address
-    address public TeazeCashAddress; //TEAZECASH contract address
-    address public NFTmarketing; //NFT/Marketing address
+    address public NFTcontract; //NFT contract address
+    address public SimpBuxAddress; //SimpBux contract address
+    address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
+    address public lootboxAddress; //lootbox address
 
     address _teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
+    
 
     IERC20 teazetoken = IERC20(_teazetoken); 
 
@@ -190,15 +200,15 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     event WithdrawRewardsOnly(address indexed user, uint256 amount);
 
     constructor(
-        TeazeCash _teaze,
+        SimpBux _simpbux,
         uint256 _startBlock,
         address _router
     ) {
-        require(address(_teaze) != address(0), "TEAZECASH address is invalid");
+        require(address(_simpbux) != address(0), "SimpBux address is invalid");
         //require(_startBlock >= block.number, "startBlock is before current block");
 
-        teazecash = _teaze;
-        TeazeCashAddress = address(_teaze);
+        simpbux = _simpbux;
+        SimpBuxAddress = address(_simpbux);
         startBlock = _startBlock;
 
         router = _router != address(0)
@@ -269,7 +279,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         addedLpTokens[address(_lpToken)] = true;
     }
 
-    // Update the given pool's TEAZECASH token allocation point. Can only be called by the owner.
+    // Update the given pool's SimpBux token allocation point. Can only be called by the owner.
     function set(
         uint256 _pid,
         uint256 _allocPoint,
@@ -284,7 +294,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         poolInfo[_pid].allocPoint = _allocPoint;
     }
 
-    // Update the given pool's TEAZECASH token allocation point when pool.
+    // Update the given pool's SimpBux token allocation point when pool.
     function adjustPools(
         uint256 _pid,
         uint256 _allocPoint,
@@ -299,7 +309,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         poolInfo[_pid].allocPoint = _allocPoint;
     }
 
-    // View function to see pending TEAZECASH tokens on frontend.
+    // View function to see pending SimpBux tokens on frontend.
     function pendingRewards(uint256 _pid, address _user) public view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
@@ -339,8 +349,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         uint256 multiplier = block.number.sub(pool.lastRewardBlock);
         uint256 teazeReward = multiplier.mul(teazePerBlock).mul(pool.allocPoint).div(totalAllocPoint);
 
-        // no minting is required, the contract should have TEAZECASH token balance pre-allocated
-        // accumulated TEAZECASH per share is stored multiplied by 10^12 to allow small 'fractional' values
+        // no minting is required, the contract should have SimpBux token balance pre-allocated
+        // accumulated SimpBux per share is stored multiplied by 10^12 to allow small 'fractional' values
         pool.accTeazePerShare = pool.accTeazePerShare.add(teazeReward.mul(1e12).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
@@ -349,7 +359,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         poolReward = _amount;
     }
 
-    // Deposit LP tokens/$Teaze to TeazeFarming for TEAZECASH token allocation.
+    // Deposit LP tokens/$Teaze to TeazeFarming for SimpBux token allocation.
     function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
 
         PoolInfo storage pool = poolInfo[_pid];
@@ -389,7 +399,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
             userStaked[_pid][_msgSender()] = true;
 
             if (!promoWallet[_msgSender()] && promoActive) {
-                userBalance[_msgSender()] = promoAmount; //give 200 promo TEAZECASH
+                userBalance[_msgSender()] = promoAmount; //give 200 promo SimpBux
                 promoWallet[_msgSender()] = true;
             }
 
@@ -503,12 +513,12 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
                         
     }
 
-    // Safe TEAZECASH token transfer function, just in case if
-    // rounding error causes pool to not have enough TEAZECASH tokens
+    // Safe simpbux token transfer function, just in case if
+    // rounding error causes pool to not have enough simpbux tokens
     function safeTokenTransfer(address _to, uint256 _amount) internal {
-        uint256 balance = teazecash.balanceOf(address(this));
+        uint256 balance = simpbux.balanceOf(address(this));
         uint256 amount = _amount > balance ? balance : _amount;
-        teazecash.transfer(_to, amount);
+        simpbux.transfer(_to, amount);
     }
 
     function setBlockRewardUpdateCycle(uint256 _blockRewardUpdateCycle) external onlyAuthorized {
@@ -608,7 +618,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
     }
 
-    //whether to allow the TeazeCash token to actually be withdrawn, of just leave it virtual (default)
+    //whether to allow the SimpBux token to actually be withdrawn, of just leave it virtual (default)
     function enableRewardWithdrawals(bool _status) public onlyAuthorized {
         enableRewardWithdraw = _status;
     }
@@ -618,18 +628,18 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         return enableRewardWithdraw;
     }
 
-    //withdraw TeazeCash
+    //withdraw SimpBux
     function withdrawRewardsOnly() public nonReentrant {
 
-        require(enableRewardWithdraw, "TEAZECASH withdrawals are not enabled");
+        require(enableRewardWithdraw, "SimpBux withdrawals are not enabled");
 
-        IERC20 rewardtoken = IERC20(TeazeCashAddress); //TEAZECASH
+        IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
 
         redeemTotalRewards(_msgSender());
 
         uint256 pending = userBalance[_msgSender()];
         if (pending > 0) {
-            require(rewardtoken.balanceOf(address(this)) > pending, "TEAZECASH token balance of this contract is insufficient");
+            require(rewardtoken.balanceOf(address(this)) > pending, "SimpBux token balance of this contract is insufficient");
             userBalance[_msgSender()] = 0;
             safeTokenTransfer(_msgSender(), pending);
         }
@@ -638,29 +648,36 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     }
 
     // Set NFT contract address
-     function setNFTAddress(address _address) external onlyAuthorized {
-        NFTAddress = _address;
+     function setNFTcontract(address _address) external onlyAuthorized {
+        NFTcontract = _address;
     }
 
-    // Set TEAZECASH contract address
-     function setTeazeCashAddress(address _address) external onlyAuthorized {
-        TeazeCashAddress = _address;
+    // Set SimpBux contract address
+     function setSimpBuxAddress(address _address) external onlyAuthorized {
+        SimpBuxAddress = _address;
     }
 
     // Set NFT contract address
      function setNFTMarketingAddress(address _address) external onlyAuthorized {
-        NFTMarketing = _address;
+        NFTmarketing = _address;
     }
 
-    //redeem the NFT with TEAZECASH only
+    //redeem the NFT with SimpBux only
     function redeem(uint256 _nftid) public nonReentrant {
     
-        uint256 creatorSimpCashPrice = ITeazeNFT(NFTAddress).getCreatorSimpCashPrice(_nftid);
-        bool creatorRedeemable = ITeazeNFT(NFTAddress).getCreatorRedeemable(_nftid);
-        uint256 creatorMinted = ITeazeNFT(NFTAddress).mintedCountbyID(_nftid);
-        uint256 creatorMintLimit = ITeazeNFT(NFTAddress).getCreatorMintLimit(_nftid);
+        /* address creatorAddress = ITeazeNFT(NFTcontract).getCreatorAddress(_nftid);
+        uint256 creatorSplit = ITeazeNFT(NFTcontract).getCreatorSplit(_nftid);
+        uint256 creatorMinted = ITeazeNFT(NFTcontract).mintedCountbyID(_nftid);
+        uint256 creatorMintLimit = ITeazeNFT(NFTcontract).getCreatorMintLimit(_nftid);
+        bool creatorPurchasable = ITeazeNFT(NFTcontract).getCreatorPurchasable(_nftid);
+        bool creatorExists = ITeazeNFT(NFTcontract).getCreatorExists(_nftid);*/
+
+        uint256 creatorSimpCashPrice = ITeazeNFT(NFTcontract).getCreatorSimpCashPrice(_nftid);
+        bool creatorRedeemable = ITeazeNFT(NFTcontract).getCreatorRedeemable(_nftid);
+        uint256 creatorMinted = ITeazeNFT(NFTcontract).mintedCountbyID(_nftid);
+        uint256 creatorMintLimit = ITeazeNFT(NFTcontract).getCreatorMintLimit(_nftid);
     
-        require(creatorRedeemable, "This NFT is not redeemable with TeazeCash");
+        require(creatorRedeemable, "This NFT is not redeemable with SimpBux");
         require(creatorMinted < creatorMintLimit, "This NFT has reached its mint limit");
 
         uint256 price = creatorSimpCashPrice;
@@ -671,22 +688,22 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
         if (userBalance[_msgSender()] < price) {
             
-            IERC20 rewardtoken = IERC20(TeazeCashAddress); //TEAZECASH
+            IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
             require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-            ITeazeNFT(NFTAddress).mint(_msgSender(), _nftid);
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
             IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
         } else {
 
-            require(userBalance[_msgSender()] >= price, "Not enough TeazeCash to redeem");
-            ITeazeNFT(NFTAddress).mint(_msgSender(), _nftid);
+            require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
             userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
         }
 
     }
 
-    //set the conversion rate between TEAZECASH and the $teaze token
+    //set the conversion rate between SimpBux and the $teaze token
     function setConverstionRate(uint256 _rate) public onlyAuthorized {
         conversionRate = _rate;
     }
@@ -694,22 +711,21 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     // users can also purchase the NFT with $teaze token and the proceeds can be split between the NFT influencer/artist and the staking pool
     function purchase(uint256 _packid) public payable nonReentrant {
         
-        address creatorAddress = ITeazeNFT(NFTAddress).getCreatorAddress(_nftid);
-        uint256 creatorPrice = ITeazeNFT(NFTAddress).getCreatorPrice(_nftid);
-        uint256 creatorSplit = ITeazeNFT(NFTAddress).getCreatorSplit(_nftid);
-        uint256 creatorMinted = ITeazeNFT(NFTAddress).mintedCountbyID(_nftid);
-        uint256 creatorMintLimit = ITeazeNFT(NFTAddress).getCreatorMintLimit(_nftid);
-        bool creatorPurchasable = ITeazeNFT(NFTAddress).getCreatorPurchasable(_nftid);
-        bool creatorExists = ITeazeNFT(NFTAddress).getCreatorExists(_nftid);
+        uint256 packTotalPrice = ITeazeNFT(NFTcontract).getUserPackPrice(_msgSender(), _packid);
+        bool packPurchasable = ITeazeNFT(NFTcontract).getCreatorPurchasable(_packid);
+        uint256 packMinted = ITeazeNFT(NFTcontract).getPackTotalMints(_packid);
+        uint256 packMintLimit = ITeazeNFT(NFTcontract).getPackMintLimit(_packid);
 
-        uint256 price = creatorPrice;
-        //price = price.mul(conversionRate);
+        uint256 price = packTotalPrice;
 
-        require(creatorPurchasable, "This NFT is not purchasable with BNB");
-        require(creatorMinted < creatorMintLimit, "This NFT has reached its mint limit");
+        if(userStaked[0][_msgSender()] || userStaked[1][_msgSender()]) {price = packTotalPrice.mul(stakedDiscount).div(100);}
+                
+        require(packPurchasable, "This NFT is not purchasable with BNB");
+        require(packMinted < packMintLimit, "This NFT Pack has reached its mint limit");
         require(msg.value == price, "BNB is insufficient for purchase");
 
-        uint256 netamount = msg.value.div(2);
+        uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
+        totalEarnedPool = totalEarnedPool + netamount;
 
         address[] memory path = new address[](2);
 
@@ -723,72 +739,37 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
                 block.timestamp
             );
 
+        ITeazeNFT(NFTcontract).mint(_msgSender(), _packid);
+        ITeazeNFT(NFTcontract).packPurchased(_msgSender(),_packid);
 
-        ITeazeNFT(NFTAddress).mint(_msgSender(), _nftid);
-        ITeazeNFT(NFTAddress).increasePurchasePrice(ITeazeNFT(NFTAddress).getPackID(_nftid));
+        payable(NFTmarketing).transfer(msg.value.mul(nftMarketingSplit).div(100));
+        totalEarnedNFT = totalEarnedNFT + msg.value.mul(nftMarketingSplit).div(100);
 
-        //To do: fix distributeTeaze function to send TEAZE to stakepool and BNB (BNB is 25% to marketing, 25% to NFT lootbox pool)
-
-        //distributeTeaze(_nftid, creatorAddress, price, creatorSplit, creatorExists);
+        payable(lootboxAddress).transfer(msg.value.mul(lootboxSplit).div(100));
+        totalEarnedLoot = totalEarnedLoot + msg.value.mul(lootboxSplit).div(100);
         
     }
 
-    //distribute $teaze/bnb to various places
-    function distributeTeaze(uint256 _nftid, address _creator, uint256 _price, uint256 _creatorSplit, bool _creatorExists) internal {
-        if (_creatorExists) { 
-            uint256 creatorShare;
-            uint256 remainingShare;
-            uint256 burnShare;
-            uint256 poolShare;
-            creatorShare = _price.mul(_creatorSplit).div(100);
-            remainingShare = _price.sub(creatorShare);           
-
-            IERC20(teazetoken).transferFrom(_msgSender(), address(this), _price);
-
-            if (creatorShare > 0) {
-
-                totalEarnedCreator[_nftid] = totalEarnedCreator[_nftid].add(creatorShare);
-                IERC20(teazetoken).safeTransfer(address(_creator), creatorShare);                
-                
-            }
-
-            if (remainingShare > 0) {
-                burnShare = remainingShare.mul(50).div(100);
-                poolShare = remainingShare.mul(50).div(100);
-
-                totalEarnedPool[_nftid] = totalEarnedPool[_nftid].add(poolShare);
-                IERC20(teazetoken).safeTransfer(address(0x000000000000000000000000000000000000dEaD), burnShare);
-                totalEarnedBurn[_nftid] = totalEarnedBurn[_nftid].add(burnShare);
-            }
-
-        } else {
-            IERC20(teazetoken).transferFrom(_msgSender(), address(this), _price.mul(50).div(100));
-            totalEarnedPool[_nftid] = totalEarnedPool[_nftid].add(_price.mul(50).div(100));
-
-            IERC20(teazetoken).transferFrom(_msgSender(), address(0x000000000000000000000000000000000000dEaD), _price.mul(50).div(100));
-            totalEarnedBurn[_nftid] = totalEarnedBurn[_nftid].add(_price.mul(50).div(100));
-        }
-    }
-
-    // We can give the artists/influencers a TeazeCash balance so they can redeem their own NFTs
-    function setTeazeCashBalance(address _address, uint256 _amount) public onlyAuthorized {
+    
+    // We can give the artists/influencers a SimpBux balance so they can redeem their own NFTs
+    function setSimpBuxBalance(address _address, uint256 _amount) public onlyAuthorized {
         userBalance[_address] = _amount;
     }
 
-    function reduceTeazeCashBalance(address _address, uint256 _amount) public onlyAuthorized {
+    function reduceSimpBuxBalance(address _address, uint256 _amount) public onlyAuthorized {
         userBalance[_address] = userBalance[_address].sub(_amount);
     }
 
-    function increaseTeazeCashBalance(address _address, uint256 _amount) public onlyAuthorized {
+    function increaseSimpBuxBalance(address _address, uint256 _amount) public onlyAuthorized {
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
-    // Get rate of TeazeCash/$Teaze conversion
+    // Get rate of SimpBux/$Teaze conversion
     function getConversionRate() external view returns (uint256) {
         return conversionRate;
     }
 
-    // Get price of NFT in $teaze based on TeazeCash _price
+    // Get price of NFT in $teaze based on SimpBux _price
     function getConversionPrice(uint256 _price) external view returns (uint256) {
         uint256 newprice = _price.mul(conversionRate);
         return newprice;
@@ -796,7 +777,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     // Get price of NFT in $teaze based on NFT
     function getConversionNFTPrice(uint256 _nftid) external view returns (uint256) {
-        uint256 nftprice = ITeazeNFT(NFTAddress).getCreatorPrice(_nftid);
+        uint256 nftprice = ITeazeNFT(NFTcontract).getCreatorPrice(_nftid);
         uint256 newprice = nftprice.mul(conversionRate);
         return newprice;
     }
@@ -862,7 +843,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         }       
     }
 
-    // Sets true/false for the TEAZECASH promo for new stakers
+    // Sets true/false for the SimpBux promo for new stakers
     function setPromoStatus(bool _status) external onlyAuthorized {
         promoActive = _status;
     }
@@ -973,7 +954,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     }
 
     function changeBuyGasLimit(uint256 _gasLimitAmount) external onlyOwner {
-        marketBuyGas = _gasLimitAmount
+        marketBuyGas = _gasLimitAmount;
     }
     
 }
