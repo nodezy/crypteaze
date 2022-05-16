@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // Teaze.Finance Staking Contract Version 1.0
-// Stake your $teaze or LP tokens to receive Teazecash rewards (XXXCASH)
+// Stake your $teaze or LP tokens to receive SimpBux rewards (SBX)
 
 pragma solidity ^0.8.9;
 
@@ -15,20 +15,17 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./simpbux.sol";
 
 interface ITeazeNFT {
-  function mint(address to, uint256 id) external;
-  function getCreatorAddress(uint256 _nftid) external view returns (address);
-  function getCreatorPrice(uint256 _nftid) external view returns (uint256);
-  function getCreatorSimpCashPrice(uint256 _nftid) external view returns (uint256);
-  function getCreatorSplit(uint256 _nftid) external view returns (uint256);
-  function getCreatorMintLimit(uint256 _nftid) external view returns (uint256);
-  function getCreatorRedeemable(uint256 _nftid) external view returns (bool);
-  function getCreatorPurchasable(uint256 _nftid) external view returns (bool);
-  function getCreatorExists(uint256 _nftid) external view returns (bool);
+  function mint(address to, uint256 id, bool method) external;
+  function getPackPrice(uint256 _nftid) external view returns (uint256);
+  function getPackSimpCashPrice(uint256 _nftid) external view returns (uint256);
+  function getPackSplit(uint256 _nftid) external view returns (uint256);
+  function getPackMintLimit(uint256 _nftid) external view returns (uint256);
+  function getPackRedeemable(uint256 _nftid) external view returns (bool);
+  function getPackPurchasable(uint256 _nftid) external view returns (bool);
+  function getPackExists(uint256 _nftid) external view returns (bool);
   function mintedCountbyID(uint256 _id) external view returns (uint256);
   function getPackIDbyNFT(uint256 _nftid) external returns (uint256);
   function packPurchased(address _recipient, uint256 _nftid) external; 
-  function getPackPrice(uint256 _packid) external view returns (uint256);
-  function getPackMintLimit(uint256 _packid) external view returns (uint256);
   function getPackTotalMints(uint256 _packid) external view returns (uint256);
   function getUserPackPrice(address _recipient, uint256 _packid) external view returns (uint256);
 }
@@ -665,22 +662,15 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     //redeem the NFT with SimpBux only
     function redeem(uint256 _nftid) public nonReentrant {
     
-        /* address creatorAddress = ITeazeNFT(NFTcontract).getCreatorAddress(_nftid);
-        uint256 creatorSplit = ITeazeNFT(NFTcontract).getCreatorSplit(_nftid);
-        uint256 creatorMinted = ITeazeNFT(NFTcontract).mintedCountbyID(_nftid);
-        uint256 creatorMintLimit = ITeazeNFT(NFTcontract).getCreatorMintLimit(_nftid);
-        bool creatorPurchasable = ITeazeNFT(NFTcontract).getCreatorPurchasable(_nftid);
-        bool creatorExists = ITeazeNFT(NFTcontract).getCreatorExists(_nftid);*/
-
-        uint256 creatorSimpCashPrice = ITeazeNFT(NFTcontract).getCreatorSimpCashPrice(_nftid);
-        bool creatorRedeemable = ITeazeNFT(NFTcontract).getCreatorRedeemable(_nftid);
-        uint256 creatorMinted = ITeazeNFT(NFTcontract).mintedCountbyID(_nftid);
-        uint256 creatorMintLimit = ITeazeNFT(NFTcontract).getCreatorMintLimit(_nftid);
+        uint256 packSimpCashPrice = ITeazeNFT(NFTcontract).getPackSimpCashPrice(_nftid);
+        bool packRedeemable = ITeazeNFT(NFTcontract).getPackRedeemable(_nftid);
+        uint256 packMinted = ITeazeNFT(NFTcontract).mintedCountbyID(_nftid);
+        uint256 packMintLimit = ITeazeNFT(NFTcontract).getPackMintLimit(_nftid);
     
-        require(creatorRedeemable, "This NFT is not redeemable with SimpBux");
-        require(creatorMinted < creatorMintLimit, "This NFT has reached its mint limit");
+        require(packRedeemable, "This NFT is not redeemable with SimpBux");
+        require(packMinted < packMintLimit, "This NFT has reached its mint limit");
 
-        uint256 price = creatorSimpCashPrice;
+        uint256 price = packSimpCashPrice;
 
         require(price > 0, "NFT not found");
 
@@ -690,13 +680,13 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
             
             IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
             require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid, true);
             IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
         } else {
 
             require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
-            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid, true);
             userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
         }
@@ -712,7 +702,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     function purchase(uint256 _packid) public payable nonReentrant {
         
         uint256 packTotalPrice = ITeazeNFT(NFTcontract).getUserPackPrice(_msgSender(), _packid);
-        bool packPurchasable = ITeazeNFT(NFTcontract).getCreatorPurchasable(_packid);
+        bool packPurchasable = ITeazeNFT(NFTcontract).getPackPurchasable(_packid);
         uint256 packMinted = ITeazeNFT(NFTcontract).getPackTotalMints(_packid);
         uint256 packMintLimit = ITeazeNFT(NFTcontract).getPackMintLimit(_packid);
 
@@ -739,7 +729,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
                 block.timestamp
             );
 
-        ITeazeNFT(NFTcontract).mint(_msgSender(), _packid);
+        ITeazeNFT(NFTcontract).mint(_msgSender(), _packid, false);
         ITeazeNFT(NFTcontract).packPurchased(_msgSender(),_packid);
 
         payable(NFTmarketing).transfer(msg.value.mul(nftMarketingSplit).div(100));
@@ -777,7 +767,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     // Get price of NFT in $teaze based on NFT
     function getConversionNFTPrice(uint256 _nftid) external view returns (uint256) {
-        uint256 nftprice = ITeazeNFT(NFTcontract).getCreatorPrice(_nftid);
+        uint256 nftprice = ITeazeNFT(NFTcontract).getPackPrice(_nftid);
         uint256 newprice = nftprice.mul(conversionRate);
         return newprice;
     }
