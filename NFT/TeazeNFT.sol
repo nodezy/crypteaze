@@ -11,6 +11,16 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+//To Do: provide function that removes collections 
+//Removing a collection needs to accomplish the following:
+//-remove collection in struct (is re-arrangement necessary?)
+//-set all NFT assigned to that collection to unassigned
+//-set collection[name] to false
+
+//Update functions to edit packs/nfts
+//Provide interface for marketplace/lootbox contract to interact with
+
+
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
 
@@ -76,7 +86,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         uint256 creatorSplit; //percent to split proceeds with creator/pool;
         uint256 mintLimit; //total amount of this NFT to mint
         bool redeemable; //can be purchased with SimpBux
-        bool purchasable; //can be purchased with Teaze tokens
+        bool purchasable; //can be purchased with BNB tokens
         bool exists;
     }
 
@@ -91,7 +101,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
     mapping (string => bool) private collections; //Whether the collection name exists or not.
-    mapping (uint => bool) private packs; //Whether the collection name exists or not.
+    mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint => uint256[]) private PackIDS; // array of NFT ID's listed under each pack.
@@ -108,7 +118,9 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     receive() external payable {}
 
-    function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
+    function mint(address _recipient, uint256 _packid, bool _method) public nonReentrant returns (uint256) {
+
+        //method: false = BNB purchase, true = redeem with SBX
 
         require(address(farmingContract) != address(0), "Farming contract address is invalid");
         require(msg.sender == address(farmingContract), "Minting not allowed outside of the farming contract");
@@ -154,6 +166,12 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         //update counters
 
+        if(!_method) { //user paid in BNB, record so next purchase increases in price
+
+        userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
+            
+        }
+
         NFTmintedCountURI[nftinfo.uri] = NFTmintedCountURI[nftinfo.uri] + 1;
 
         NFTmintedCountID[nftid] = NFTmintedCountID[nftid] + 1;
@@ -191,7 +209,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return farmingContract;
     }
 
-    function setPackInfo (address _creator, string memory _collectionName, uint256 _packID, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _splitPercent, uint256 _mintLimit) public onlyWhitelisted returns (uint256) {
+    function setPackInfo (address _creator, string memory _collectionName, uint256 _packID, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _splitPercent, uint256 _mintLimit,  bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "Sender is not whitelisted"); 
         require(bytes(_collectionName).length > 0, "Collection name string must not be empty");
         require(!collections[_collectionName], "A pack or collection already exists under that name");
@@ -217,22 +235,17 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         packinfo.priceStep = _priceStep;
         packinfo.creatorSplit = _splitPercent;
         packinfo.mintLimit = _mintLimit;
+        packinfo.redeemable = _redeemable;
+        packinfo.purchasable = _purchasable;
 
         packs[_packid] = true;
         collections[_collectionName] = true;
-
-        //To Do: provide function that removes collections 
-        //Removing a collection needs to accomplish the following:
-        //-remove collection in struct (is re-arrangement necessary?)
-        //-set all NFT assigned to that collection to unassigned
-        //-set collection[name] to false
-
 
     }
 
     
     //NFT's get added to a pack # along with mint class (for the lootbox ordering) and mint percentages (for the user mint chance)
-    function setNFTInfo(string memory _nftName, string memory _URI, uint256 _packID, uint256 _mintClass, uint256 _mintPercent, bool _redeemable, bool _purchasable, bool _lootboxable) public onlyWhitelisted returns (uint256) {
+    function setNFTInfo(string memory _nftName, string memory _URI, uint256 _packID, uint256 _mintClass, uint256 _mintPercent, bool _lootboxable) public onlyWhitelisted returns (uint256) {
 
         require(bytes(_nftName).length > 0, "NFT name string must not be empty");
         require(bytes(_URI).length > 0, "URI string must not be empty");
@@ -252,7 +265,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
-           nftinfo.nftName = _nftName;
+           nftinfo.nftName = _nftName;  
            nftinfo.uri = _URI;
            nftinfo.packID = _packID;
            nftinfo.mintClass = _mintClass;
@@ -261,6 +274,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
            nftinfo.exists = true;
 
             NFTuriExists[_URI] = true;
+
+            //nftName, uri, packID, mintClass, mintPercent, 
 
             //To Do: if this NFT is inserted into the wrong pack, provide function that deletes from current pack and adds to correct pack
 
@@ -283,7 +298,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         uint256 count = 0;
         uint256 percentTotal = 0;
 
-        for (uint256 x = 1; x <= totalNFT; ++x) {
+        for (uint256 x = 0; x < totalNFT; ++x) {
 
             NFTInfo storage nftinfo = nftInfo[x];
 
@@ -298,7 +313,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         return (ids,name,percentTotal);
     }
-
+    
+    //Returns the name of all packs or collections
     function getAllCollectionNames() public view returns (uint256[] memory, string[] memory) {
 
         uint256 totalPacks = _PackIds.current();
@@ -463,7 +479,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return nftinfo.mintLimit;
     }
 
-    // Set NFT redeemable with TeazeCash
+    // Set NFT redeemable with SimpBux
     function setNFTredeemable(uint256 _nftid, bool _redeemable) public onlyAuthorized {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
