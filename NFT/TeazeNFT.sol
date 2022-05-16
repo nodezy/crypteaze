@@ -90,6 +90,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         bool exists;
     }
 
+    mapping (string => bool) private collections; //Whether the collection name exists or not.
+    mapping (uint => bool) private packs; //Whether the collection name exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint => uint256[]) private PackIDS; // array of NFT ID's listed under each pack.
@@ -191,7 +193,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     function setPackInfo (address _creator, string memory _collectionName, uint256 _packID, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _splitPercent, uint256 _mintLimit) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "Sender is not whitelisted"); 
-        require(bytes(_collectionName).length > 0, "Creator name string must not be empty");
+        require(bytes(_collectionName).length > 0, "Collection name string must not be empty");
+        require(!collections[_collectionName], "A pack or collection already exists under that name");
         require(_packID >= 0, "Pack ID must be greater than or equal to zero");
         require(_price > 0, "BNB price must be greater than zero");
         require(_sbxprice > 0, "SBX price must be greater than zero");
@@ -199,8 +202,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         require(_mintLimit > 0, "Mint limit must be greater than zero");
         require(_splitPercent >= 0 && _splitPercent <= 100, "Split is not between 0 and 100");
 
-        //To Do: Add require statement to make certain pack doesn't already exist
-
+        
         _PackIds.increment();
 
         uint256 _packid = _PackIds.current();
@@ -216,6 +218,16 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         packinfo.creatorSplit = _splitPercent;
         packinfo.mintLimit = _mintLimit;
 
+        packs[_packid] = true;
+        collections[_collectionName] = true;
+
+        //To Do: provide function that removes collections 
+        //Removing a collection needs to accomplish the following:
+        //-remove collection in struct (is re-arrangement necessary?)
+        //-set all NFT assigned to that collection to unassigned
+        //-set collection[name] to false
+
+
     }
 
     
@@ -224,10 +236,15 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         require(bytes(_nftName).length > 0, "NFT name string must not be empty");
         require(bytes(_URI).length > 0, "URI string must not be empty");
+        require(packs[_packID], "Pack does not exist");
+        require(_mintClass >= 0, "mint class must be an integer equal to or greater than zero");
+        require(_mintPercent > 0, "mint percent must be an integer greater than zero");
         require(!NFTuriExists[_URI], "An NFT with this URI already exists");
 
-        //To Do: Add require statement to make certain pack already exists
-        //To Do: Add a require where the total percent of all NFT in a pack cannot exceed 100% 
+        (,,uint256 percentTotal) = getAllNFTbyPack(_packID);
+
+        require(percentTotal.add(_mintPercent)<=100,"Total mint percent of pack cannot be greater than 100. Are you adding to correct pack?");
+
 
         _NFTIds.increment();
 
@@ -245,8 +262,6 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
             NFTuriExists[_URI] = true;
 
-            //To Do: check for the NFT uri (or some other check) to make certain this NFT doesn't exist under a different pack
-
             //To Do: if this NFT is inserted into the wrong pack, provide function that deletes from current pack and adds to correct pack
 
             PackIDS[_packID].push(_nftid);
@@ -260,21 +275,45 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return _NFTIds.current();
     }
 
-    // Get all NFT IDs added by a certain address (seems to only work if more than one address exist in NFTInfo)
-    function getAllNFTbyAddress(address _address) public view returns (uint256[] memory, string[] memory) {
+    // Get all NFT IDs added to a pack, and return the mint percentage total
+    function getAllNFTbyPack(uint256 _packID) public view returns (uint256[] memory, string[] memory, uint256) {
         uint256 totalNFT = _NFTIds.current();
         uint256[] memory ids = new uint256[](totalNFT);
         string[] memory name = new string[](totalNFT);
         uint256 count = 0;
+        uint256 percentTotal = 0;
 
         for (uint256 x = 1; x <= totalNFT; ++x) {
 
             NFTInfo storage nftinfo = nftInfo[x];
 
-            if (nftinfo.creatorAddress == address(_address)) {
+            if (nftinfo.packID == _packID) {
                 count = count.add(1);
                 ids[count] = x;
                 name[count] =nftinfo.nftName;
+                percentTotal = percentTotal.add(nftinfo.mintPercent);
+            }
+
+        }
+
+        return (ids,name,percentTotal);
+    }
+
+    function getAllCollectionNames() public view returns (uint256[] memory, string[] memory) {
+
+        uint256 totalPacks = _PackIds.current();
+        uint256[] memory ids = new uint256[](totalPacks);
+        string[] memory name = new string[](totalPacks);
+        uint256 count = 0;
+
+        for (uint256 x = 0; x < totalPacks; ++x) {
+
+            PackInfo storage packinfo = packInfo[x];
+
+            if (bytes(packinfo.collectionName).length > 0) {
+                count = count.add(1);
+                ids[count] = x;
+                name[count] = packinfo.collectionName;
             }
 
         }
