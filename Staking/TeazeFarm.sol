@@ -147,7 +147,6 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
-    uint256 public conversionRate = 100000; //conversion rate of SimpBux => $teaze (default 100k).
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2000000000000000000; //max stake amount (default 2 billion Teaze).
@@ -155,7 +154,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     uint256 public maxLPStake = 10000000000000000000000; //max lp stake amount (default 10,000 LP tokens).
     uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
     uint256 public stakedDiscount = 50; //amount the price of a pack mint is discounted if the user is staked (default 50%). 
-    uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets (default 50%).
+    uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets. Higher value = higher buyback sent to stakepool (default 50%).
     uint256 public nftMarketingSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
     uint256 public lootboxSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
     bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
@@ -693,11 +692,6 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     }
 
-    //set the conversion rate between SimpBux and the $teaze token
-    function setConverstionRate(uint256 _rate) public onlyAuthorized {
-        conversionRate = _rate;
-    }
-
     // users can also purchase the NFT with $teaze token and the proceeds can be split between the NFT influencer/artist and the staking pool
     function purchase(uint256 _packid) public payable nonReentrant {
         
@@ -708,13 +702,14 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
         uint256 price = packTotalPrice;
 
-        if(userStaked[0][_msgSender()] || userStaked[1][_msgSender()]) {price = packTotalPrice.mul(stakedDiscount).div(100);}
-                
+        if(userStaked[0][_msgSender()] || userStaked[1][_msgSender()]) {price = packTotalPrice.sub(packTotalPrice.mul(stakedDiscount).div(100));}
+
         require(packPurchasable, "This NFT is not purchasable with BNB");
         require(packMinted < packMintLimit, "This NFT Pack has reached its mint limit");
         require(msg.value == price, "BNB is insufficient for purchase");
 
         uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
+        uint256 netremainder = msg.value.sub(netamount);
         totalEarnedPool = totalEarnedPool + netamount;
 
         address[] memory path = new address[](2);
@@ -732,11 +727,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         ITeazeNFT(NFTcontract).mint(_msgSender(), _packid, false);
         ITeazeNFT(NFTcontract).packPurchased(_msgSender(),_packid);
 
-        payable(NFTmarketing).transfer(msg.value.mul(nftMarketingSplit).div(100));
-        totalEarnedNFT = totalEarnedNFT + msg.value.mul(nftMarketingSplit).div(100);
+        payable(NFTmarketing).transfer(netremainder.mul(nftMarketingSplit).div(100));
+        totalEarnedNFT = totalEarnedNFT + netremainder.mul(nftMarketingSplit).div(100);
 
-        payable(lootboxAddress).transfer(msg.value.mul(lootboxSplit).div(100));
-        totalEarnedLoot = totalEarnedLoot + msg.value.mul(lootboxSplit).div(100);
+        payable(lootboxAddress).transfer(netremainder.mul(lootboxSplit).div(100));
+        totalEarnedLoot = totalEarnedLoot + netremainder.mul(lootboxSplit).div(100);
         
     }
 
@@ -754,23 +749,6 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
-    // Get rate of SimpBux/$Teaze conversion
-    function getConversionRate() external view returns (uint256) {
-        return conversionRate;
-    }
-
-    // Get price of NFT in $teaze based on SimpBux _price
-    function getConversionPrice(uint256 _price) external view returns (uint256) {
-        uint256 newprice = _price.mul(conversionRate);
-        return newprice;
-    }
-
-    // Get price of NFT in $teaze based on NFT
-    function getConversionNFTPrice(uint256 _nftid) external view returns (uint256) {
-        uint256 nftprice = ITeazeNFT(NFTcontract).getPackPrice(_nftid);
-        uint256 newprice = nftprice.mul(conversionRate);
-        return newprice;
-    }
 
     // Get the holder rewards of users staked $teaze if they were to withdraw
     function getHolderRewards(address _address) external view returns (uint256) {
@@ -943,8 +921,23 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     }
 
-    function changeBuyGasLimit(uint256 _gasLimitAmount) external onlyOwner {
+    function changeBuyGasLimit(uint256 _gasLimitAmount) external onlyAuthorized {
         marketBuyGas = _gasLimitAmount;
+    }
+
+    function updateStakedDiscount(uint256 _stakedDiscount) external onlyAuthorized {
+        require(_stakedDiscount >= 0 && _stakedDiscount <= 50, "staker discount must be between 0 and 50 percent");
+        stakedDiscount = _stakedDiscount;
+    }
+
+    function updateSplits(uint256 _packPurchaseSplit, uint256 _nftMarketingSplit, uint256 _lootboxSplit) external onlyAuthorized {
+        require(_packPurchaseSplit >=0 && _packPurchaseSplit <= 100, "pack BNB split must be between 0 and 100 percent");
+        require(_nftMarketingSplit.add(_lootboxSplit) == 100, "NFT creation and lootbox splits must add up to 100 percent");
+
+        packPurchaseSplit = _packPurchaseSplit;
+        nftMarketingSplit = _nftMarketingSplit;
+        lootboxSplit = _lootboxSplit;
+
     }
     
 }
