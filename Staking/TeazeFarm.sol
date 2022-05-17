@@ -15,7 +15,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./simpbux.sol";
 
 interface ITeazeNFT {
-  function mint(address to, uint256 id, bool method) external;
+  function mint(address to, uint256 id) external;
   function getPackPrice(uint256 _nftid) external view returns (uint256);
   function getPackSimpCashPrice(uint256 _nftid) external view returns (uint256);
   function getPackSplit(uint256 _nftid) external view returns (uint256);
@@ -153,7 +153,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     uint256 public minLPStake = 1000000000000000000000; //min lp stake amount (default 1000 LP tokens).
     uint256 public maxLPStake = 10000000000000000000000; //max lp stake amount (default 10,000 LP tokens).
     uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
-    uint256 public stakedDiscount = 50; //amount the price of a pack mint is discounted if the user is staked (default 50%). 
+    uint256 public stakedDiscount = 30; //amount the price of a pack mint is discounted if the user is staked (default 30%). 
     uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets. Higher value = higher buyback sent to stakepool (default 50%).
     uint256 public nftMarketingSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
     uint256 public lootboxSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
@@ -679,13 +679,13 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
             
             IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
             require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid, true);
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
             IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
         } else {
 
             require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
-            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid, true);
+            ITeazeNFT(NFTcontract).mint(_msgSender(), _nftid);
             userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
         }
@@ -724,7 +724,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
                 block.timestamp
             );
 
-        ITeazeNFT(NFTcontract).mint(_msgSender(), _packid, false);
+        ITeazeNFT(NFTcontract).mint(_msgSender(), _packid);
         ITeazeNFT(NFTcontract).packPurchased(_msgSender(),_packid);
 
         payable(NFTmarketing).transfer(netremainder.mul(nftMarketingSplit).div(100));
