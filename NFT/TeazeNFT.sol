@@ -123,8 +123,6 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
 
-        //method: false = BNB purchase, true = redeem with SBX
-
         require(address(farmingContract) != address(0), "Farming contract address is invalid");
         require(msg.sender == address(farmingContract), "Minting not allowed outside of the farming contract");
 
@@ -285,24 +283,23 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
     // Get all NFT IDs added to a pack, and return the mint percentage total
-    function getAllNFTbyPack(uint256 _packID) public view returns (uint256[] memory, string[] memory, uint256) {
-        uint256 totalNFT = _NFTIds.current();
-        uint256[] memory ids = new uint256[](totalNFT);
-        string[] memory name = new string[](totalNFT);
+    function getAllNFTbyPack(uint256 _packid) public view returns (uint256[] memory, string[] memory, uint256) {
+
+        uint packlength = PackIDS[_packid].length;
+
+        uint256[] memory ids = new uint256[](packlength);
+        string[] memory name = new string[](packlength);
         uint256 count = 0;
         uint256 percentTotal = 0;
 
-        for (uint256 x = 0; x < totalNFT; ++x) {
+        for (uint256 x = 0; x < packlength; ++x) {          
 
-            NFTInfo storage nftinfo = nftInfo[x];
-
-            if (nftinfo.packID == _packID) {
-                count = count.add(1);
-                ids[count] = x;
-                name[count] = nftinfo.nftName;
-                percentTotal = percentTotal.add(nftinfo.mintPercent);
-            }
-
+            NFTInfo storage nftinfo = nftInfo[PackIDS[_packid][x]];
+            count = count.add(1);
+            ids[count] = x;
+            name[count] = nftinfo.nftName;
+            percentTotal = percentTotal.add(nftinfo.mintPercent);
+           
         }
 
         return (ids,name,percentTotal);
@@ -369,18 +366,22 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
     function assignAllNFTtoPack(uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) internal returns (bool) {
-        uint256 totalNFT = _NFTIds.current();
 
-        for (uint256 x = 0; x < totalNFT; ++x) {
+        uint packfromlength = PackIDS[_packIDfrom].length;
 
-            NFTInfo storage nftinfo = nftInfo[x];
+        for (uint256 x = 0; x < packfromlength; ++x) {          
 
-            if (nftinfo.packID == _packIDfrom) {
-                nftinfo.packID = _packIDto;
-                nftinfo.lootboxable = _lootboxable;
+            NFTInfo storage nftinfo = nftInfo[PackIDS[_packIDfrom][x]];
+            
+            nftinfo.packID = _packIDto;
+            nftinfo.lootboxable = _lootboxable;
 
-            }
+            //remove all NFT in 'from' pack
+            PackIDS[_packIDfrom][x].pop();
 
+            //add NFT to 'to' pack mapping, will be created if it doesn't exist
+            PackIDS[_packIDto].push(PackIDS[_packIDfrom][x]);
+           
         }
 
         return (true);
@@ -401,6 +402,27 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
            NFTuriExists[nftinfo.uri] = false;
 
+           uint packfromlength = PackIDS[nftinfo.packID].length;
+
+           for (uint256 x = 0; x < packfromlength; ++x) {   
+
+               if (PackIDS[nftinfo.packID][x] == _nftid) {
+
+                   if(x == packfromlength-1) { //last in array, pop
+
+                   PackIDS[nftinfo.packID][x].pop();
+
+                   } else { //copy last in array to this, then pop last
+
+                   PackIDS[nftinfo.packID][x] = PackIDS[nftinfo.packID][packfromlength-1]; 
+                   PackIDS[nftinfo.packID][packfromlength-1].pop(); 
+
+                   }
+
+               }
+
+           }
+
            nftinfo.nftCreatorAddress = nftinfocopy.nftCreatorAddress;
            nftinfo.nftName = nftinfocopy.nftName;
            nftinfo.uri = nftinfocopy.uri;
@@ -420,6 +442,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
            nftinfo.exists = false;
 
            _NFTIds.decrement();
+
+           
        
     }
 
