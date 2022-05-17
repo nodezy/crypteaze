@@ -20,6 +20,8 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 //Update functions to edit packs/nfts
 //Provide interface for marketplace/lootbox contract to interact with
 
+//sort out whitelist/authorized situation, i.e. will we allow outsiders to create packs/nft and add to the sytem?
+
 
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
@@ -34,6 +36,7 @@ contract Authorizable is Ownable {
     function addAuthorized(address _toAdd) onlyOwner public {
         require(_toAdd != address(0));
         authorized[_toAdd] = true;
+        
     }
 
     function removeAuthorized(address _toRemove) onlyOwner public {
@@ -50,7 +53,7 @@ contract Whitelisted is Ownable, Authorizable {
     mapping(address => bool) public whitelisted;
 
     modifier onlyWhitelisted() {
-        require(whitelisted[_msgSender()] || authorized[_msgSender()]);
+        require(whitelisted[_msgSender()] || authorized[_msgSender()] || owner() == address(_msgSender()));
         _;
     }
 
@@ -76,14 +79,13 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     Counters.Counter private _PackIds; //so we can track which Packs have been added to the system
     Counters.Counter private _NFTIds; //so we can track which NFT's have been added to the Packs
 
-    struct PackInfo {
-        address creatorAddress; //wallet address of the NFT creator/infuencer
+    struct PackInfo { //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchaseable, exists
+        address packCreatorAddress; //wallet address of the Pack creator
         string collectionName; // Name of nft creator/influencer/artist
         uint256 packID; //ID of the pack
         uint256 price; //BNB minting price of the NFT Pack
         uint256 priceStep; //how much the price of the NFT should increase in BNB
         uint256 sbxprice; //SimpBux price of minting from the NFT Pack
-        uint256 creatorSplit; //percent to split proceeds with creator/pool;
         uint256 mintLimit; //total amount of this NFT to mint
         bool redeemable; //can be purchased with SimpBux
         bool purchasable; //can be purchased with BNB tokens
@@ -91,6 +93,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
     struct NFTInfo {
+        address nftCreatorAddress; //wallet address of the Pack creator
         string nftName; // Name of the actual NFT artwork
         string uri; //address of NFT metadata
         uint256 packID; //ID of the 3 card pack
@@ -118,7 +121,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     receive() external payable {}
 
-    function mint(address _recipient, uint256 _packid, bool _method) public nonReentrant returns (uint256) {
+    function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
 
         //method: false = BNB purchase, true = redeem with SBX
 
@@ -134,7 +137,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         require(packlength >= 3, "Not enough NFTs in this pack to mint from");
 
-        uint256 roll = uint256(block.blockhash(block.number-1)) % 100; //get user roll 0-99
+        uint256 roll = uint256(blockhash(block.number-1)) % 100; //get user roll 0-99
         
         uint256[] memory array = new uint256[](100); //create array from 0-99
 
@@ -165,12 +168,6 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         _setTokenURI(newItemId,nftinfo.uri);
 
         //update counters
-
-        if(!_method) { //user paid in BNB, record so next purchase increases in price
-
-        userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
-            
-        }
 
         NFTmintedCountURI[nftinfo.uri] = NFTmintedCountURI[nftinfo.uri] + 1;
 
@@ -209,44 +206,43 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return farmingContract;
     }
 
-    function setPackInfo (address _creator, string memory _collectionName, uint256 _packID, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _splitPercent, uint256 _mintLimit,  bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
+    function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "Sender is not whitelisted"); 
         require(bytes(_collectionName).length > 0, "Collection name string must not be empty");
         require(!collections[_collectionName], "A pack or collection already exists under that name");
-        require(_packID >= 0, "Pack ID must be greater than or equal to zero");
-        require(_price > 0, "BNB price must be greater than zero");
-        require(_sbxprice > 0, "SBX price must be greater than zero");
-        require(_priceStep >= 0, "Price must be greater than or equal zero");
+        if(_purchasable) {require(_price > 0, "BNB price must be greater than zero");}
+        if(_redeemable) {require(_sbxprice > 0, "SBX price must be greater than zero");}       
+        require(_priceStep >= 0, "Pricestep must be greater than or equal to zero");
         require(_mintLimit > 0, "Mint limit must be greater than zero");
-        require(_splitPercent >= 0 && _splitPercent <= 100, "Split is not between 0 and 100");
-
-        
+                
         _PackIds.increment();
 
         uint256 _packid = _PackIds.current();
 
         PackInfo storage packinfo = packInfo[_packid];
-
-        packinfo.creatorAddress = _creator;
+        
+        packinfo.packCreatorAddress = _msgSender();
         packinfo.collectionName = _collectionName;
-        packinfo.packID = _packID;
+        packinfo.packID = _packid;
         packinfo.price = _price;
         packinfo.sbxprice = _sbxprice;
         packinfo.priceStep = _priceStep;
-        packinfo.creatorSplit = _splitPercent;
         packinfo.mintLimit = _mintLimit;
-        packinfo.redeemable = _redeemable;
-        packinfo.purchasable = _purchasable;
+        packinfo.redeemable = _redeemable; //whether pack can be opened with SBX
+        packinfo.purchasable = _purchasable; //whether the pack can be opened with BNB
+        packinfo.exists = true;
 
         packs[_packid] = true;
         collections[_collectionName] = true;
-
+        
+        return _packid;
     }
 
     
     //NFT's get added to a pack # along with mint class (for the lootbox ordering) and mint percentages (for the user mint chance)
     function setNFTInfo(string memory _nftName, string memory _URI, uint256 _packID, uint256 _mintClass, uint256 _mintPercent, bool _lootboxable) public onlyWhitelisted returns (uint256) {
 
+        require(whitelisted[_msgSender()], "Sender is not whitelisted"); 
         require(bytes(_nftName).length > 0, "NFT name string must not be empty");
         require(bytes(_URI).length > 0, "URI string must not be empty");
         require(packs[_packID], "Pack does not exist");
@@ -256,8 +252,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         (,,uint256 percentTotal) = getAllNFTbyPack(_packID);
 
-        require(percentTotal.add(_mintPercent)<=100,"Total mint percent of pack cannot be greater than 100. Are you adding to correct pack?");
-
+        require(percentTotal.add(_mintPercent) <= 100,"Total mint percent of pack cannot be greater than 100. Are you adding to correct pack?");
 
         _NFTIds.increment();
 
@@ -265,17 +260,16 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
+           nftinfo.nftCreatorAddress = _msgSender();
            nftinfo.nftName = _nftName;  
            nftinfo.uri = _URI;
            nftinfo.packID = _packID;
            nftinfo.mintClass = _mintClass;
            nftinfo.mintPercent = _mintPercent;
-           nftinfo.lootboxable = _lootboxable;
+           nftinfo.lootboxable = _lootboxable; //Whether this NFT can be added to a lootbox
            nftinfo.exists = true;
 
             NFTuriExists[_URI] = true;
-
-            //nftName, uri, packID, mintClass, mintPercent, 
 
             //To Do: if this NFT is inserted into the wrong pack, provide function that deletes from current pack and adds to correct pack
 
@@ -305,7 +299,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
             if (nftinfo.packID == _packID) {
                 count = count.add(1);
                 ids[count] = x;
-                name[count] =nftinfo.nftName;
+                name[count] = nftinfo.nftName;
                 percentTotal = percentTotal.add(nftinfo.mintPercent);
             }
 
@@ -337,75 +331,129 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return (ids,name);
     }
 
+    function deletePack(uint256 _packid) external onlyWhitelisted {
+
+        PackInfo storage packinfo = packInfo[_packid];
+        PackInfo storage packinfocopy = packInfo[_PackIds.current()];
+
+        require(packinfo.packCreatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
+
+        //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchaseable, exists  
+
+        packinfo.packCreatorAddress = packinfocopy.packCreatorAddress;
+        packinfo.collectionName = packinfocopy.collectionName;
+        packinfo.packID = packinfocopy.packID;
+        packinfo.price = packinfocopy.price;
+        packinfo.priceStep = packinfocopy.priceStep;
+        packinfo.sbxprice = packinfocopy.sbxprice;
+        packinfo.mintLimit = packinfocopy.mintLimit;
+        packinfo.redeemable = packinfocopy.redeemable;
+        packinfo.purchasable = packinfocopy.purchasable;
+        packinfo.exists = true;    
+
+        packinfo.packCreatorAddress = address(0);
+        packinfo.collectionName = "";
+        packinfo.packID = 0;
+        packinfo.price = 0;
+        packinfo.priceStep = 0;
+        packinfo.sbxprice = 0;
+        packinfo.mintLimit = 0;
+        packinfo.redeemable = false;
+        packinfo.purchasable = false;
+        packinfo.exists = false;    
+
+        _PackIds.decrement();
+
+        assignAllNFTtoPack(_packid,0,false);
+
+    }
+
+    function assignAllNFTtoPack(uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) internal returns (bool) {
+        uint256 totalNFT = _NFTIds.current();
+
+        for (uint256 x = 0; x < totalNFT; ++x) {
+
+            NFTInfo storage nftinfo = nftInfo[x];
+
+            if (nftinfo.packID == _packIDfrom) {
+                nftinfo.packID = _packIDto;
+                nftinfo.lootboxable = _lootboxable;
+
+            }
+
+        }
+
+        return (true);
+    }
+
+    function assignAllNFTtoPackAuth(uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) external onlyAuthorized returns (bool) {
+       return assignAllNFTtoPack(_packIDfrom,_packIDto,_lootboxable);
+    }
+
     
     // Set creator address to new, or set to 0 address to clear out the NFT completely
-    function setCreatorAddress(uint256 _nftid, address _address) public onlyAuthorized {
+    function deleteNFT(uint256 _nftid) public onlyWhitelisted {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
+        NFTInfo storage nftinfocopy = nftInfo[_NFTIds.current()];
 
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
+        require(nftinfo.nftCreatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
 
-        if (_address == address(0)) {
+           NFTuriExists[nftinfo.uri] = false;
 
-            _NFTIds.decrement();
+           nftinfo.nftCreatorAddress = nftinfocopy.nftCreatorAddress;
+           nftinfo.nftName = nftinfocopy.nftName;
+           nftinfo.uri = nftinfocopy.uri;
+           nftinfo.packID = nftinfocopy.packID;
+           nftinfo.mintClass = nftinfocopy.mintClass;
+           nftinfo.mintPercent = nftinfocopy.mintPercent;
+           nftinfo.lootboxable = nftinfocopy.lootboxable;
+           nftinfo.exists = true;
 
-            NFTuriExists[nftinfo.uri] = false;
-
-           nftinfo.creatorAddress = _address;
-           nftinfo.collectionName = "";
+           nftinfo.nftCreatorAddress = address(0);
            nftinfo.nftName = "";
            nftinfo.uri = "";
-           nftinfo.price = 0;
-           nftinfo.creatorSplit = 0;
-           nftinfo.mintLimit = 0;
-           nftinfo.redeemable = false;
-           nftinfo.purchasable = false;
+           nftinfo.packID = 0;
+           nftinfo.mintClass = 0;
+           nftinfo.mintPercent = 0;
+           nftinfo.lootboxable = false;
            nftinfo.exists = false;
 
-        } else {
-
-           nftinfo.creatorAddress = _address;
-        }
+           _NFTIds.decrement();
+       
     }
 
-    // Get NFT creator/influence/artist info
-    function getNFTInfo(uint256 _nftid) external view returns (address,string memory,string memory,string memory,uint256,uint256,uint256,bool,bool,bool) {
+    // Get nftName, uri, packID, mintClass, mintPercent, lootboxable, exists
+    function getNFTInfo(uint256 _nftid) external view returns (address, string memory,string memory,uint256,uint256,uint256,bool,bool) {
         NFTInfo storage nftinfo = nftInfo[_nftid];
-        return (nftinfo.creatorAddress,nftinfo.collectionName,nftinfo.nftName,nftinfo.uri,nftinfo.price,nftinfo.creatorSplit,nftinfo.mintLimit,nftinfo.redeemable,nftinfo.purchasable,nftinfo.exists);
+        return (nftinfo.nftCreatorAddress,nftinfo.nftName,nftinfo.uri,nftinfo.packID,nftinfo.mintClass,nftinfo.mintPercent,nftinfo.lootboxable,nftinfo.exists);
     }
 
-    // Get NFT influencer/artist/creator address
-    function getCreatorAddress(uint256 _nftid) external view returns (address) {
+
+    // Set NFT creator name
+    function setNFTName(uint256 _nftid, string memory _name) public onlyAuthorized {
+
         NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.creatorAddress;
+
+        require(bytes(_name).length > 0, "NFT name string must not be empty");    
+
+       nftinfo.nftName = _name;
     }
 
     // Get NFT URI string
-    function getCreatorURI(uint256 _nftid) external view returns (string memory) {
+    function getNFTURI(uint256 _nftid) external view returns (string memory) {
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.uri;
     }
 
-    // Set NFT creator name
-    function setNFTcollectionName(uint256 _nftid, string memory _name) public onlyAuthorized {
+    // Set NFT packID
+    function setNFTPackID(uint256 _nftid, uint256 _packid) public onlyAuthorized {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");   
-        require(bytes(_name).length > 0, "Creator name string must not be empty");    
+        require(packs[_packid], "Pack does not exist");   
 
-       nftinfo.collectionName = _name;
-    }
-
-    // Set NFT name
-    function setNFTname(uint256 _nftid, string memory _name) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");   
-        require(bytes(_name).length > 0, "NFT name string must not be empty");     
-
-       nftinfo.nftName = _name;
+       nftinfo.packID = _packid;
     }
 
     // Set NFT URI string
@@ -413,7 +461,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
+        require(nftinfo.nftCreatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
         require(bytes(_uri).length > 0, "URI string must not be empty");     
         require(!NFTuriExists[_uri], "An NFT with this URI already exists"); 
 
@@ -424,89 +472,28 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         NFTuriExists[_uri] = true;
     }
 
-     // Set cost of NFT
-    function setNFTCost(uint256 _nftid, uint256 _cost) public onlyAuthorized {
+    //NFT mintClass
 
-        NFTInfo storage nftinfo = nftInfo[_nftid];
+    //NFT mintPercent
 
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
-        require(_cost > 0, "Price must be greater than zero");
+    //NFT exists
 
-       nftinfo.price = _cost;
-    }
-
-    // Get cost of NFT
-    function getCreatorPrice(uint256 _nftid) external view returns (uint256) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.price;
-    }
+    
+    
 
     // Get cost of NFT in staking currency
-    function getCreatorSimpBuxPrice(uint256 _nftid) external view returns (uint256) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.sbxprice;
-    }
-
-    // Set profit sharing of NFT
-    function setNFTSplit(uint256 _nftid, uint256 _split) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
-        require(_split >= 0 && _split <= 100, "Split is not between 0 and 100");
-
-       nftinfo.creatorSplit = _split;
-    }
-
-    function getCreatorSplit(uint256 _nftid) external view returns (uint256) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.creatorSplit;
-    }
-
-    // Set NFT mint limit
-    function setNFTmintLimit(uint256 _nftid, uint256 _limit) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized"); 
-        require(_limit > 0, "Mint limit must be greater than zero");
-
-       nftinfo.mintLimit = _limit;
-    }
-
-    function getCreatorMintLimit(uint256 _nftid) external view returns (uint256) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.mintLimit;
-    }
-
-    // Set NFT redeemable with SimpBux
-    function setNFTredeemable(uint256 _nftid, bool _redeemable) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized"); 
-
-       nftinfo.redeemable = _redeemable;
+    function getPackSimpBuxPrice(uint256 _packid) external view returns (uint256) {
+        PackInfo storage packinfo = packInfo[_packid];
+        return packinfo.sbxprice;
     }
 
     
-
-    // Set NFT purchasable with Teaze tokens
-    function setNFTpurchasable(uint256 _nftid, bool _purchasable) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(nftinfo.creatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized"); 
-
-       nftinfo.redeemable = _purchasable;
+    function packExists(uint256 _packid) external view returns (bool) {
+        PackInfo storage packinfo = packInfo[_packid];
+        return packinfo.exists;
     }
 
-    function getCreatorPurchasable(uint256 _nftid) external view returns (bool) {
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-        return nftinfo.purchasable;
-    }
-
-    function getCreatorExists(uint256 _nftid) external view returns (bool) {
+    function nftExists(uint256 _nftid) external view returns (bool) {
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.exists;
     }
@@ -540,7 +527,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return nftID;
     }
 
-    function getPackIDbyNFT(uint256 _nftid) external returns (uint256) {
+    function getPackIDbyNFT(uint256 _nftid) external view returns (uint256) {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.packID;
@@ -551,22 +538,31 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         require(msg.sender == address(farmingContract), "Function call not allowed outside of the farming contract");
 
-        PackInfo storage packinfo = packInfo[_packid];
-
-       packinfo.price = packinfo.price.add(packinfo.priceStep);
-
+        userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
     }
 
-    function getPackPrice(uint256 _packid) public returns (uint256) {
+    function getPackPrice(uint256 _packid) public view returns (uint256) {
         PackInfo storage packinfo = packInfo[_packid];
 
         return packinfo.price;
     }
 
-    function getPackPriceStep(uint256 _packid) public returns (uint256) {
+    function getPackPriceStep(uint256 _packid) public view returns (uint256) {
         PackInfo storage packinfo = packInfo[_packid];
 
         return packinfo.priceStep;
+    }
+
+    // Set cost of opening a pack
+    function setPackPrice(uint256 _packid, uint256 _price, uint256 _sbxprice) public onlyAuthorized {
+
+        PackInfo storage packinfo = packInfo[_packid];
+
+        require(_price > 0, "BNB price must be greater than zero");
+        require(_sbxprice > 0, "SBX price must be greater than zero");
+
+       packinfo.price = _price;
+       packinfo.sbxprice = _sbxprice;
     }
 
     function getPackRedeemable(uint256 _packid) external view returns (bool) {
@@ -574,15 +570,42 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return packinfo.redeemable;
     }
 
+    // Set NFT redeemable with SimpBux
+    function setPackRedeemable(uint256 _packid, bool _redeemable) public onlyAuthorized {
+
+        PackInfo storage packinfo = packInfo[_packid];
+
+       packinfo.redeemable = _redeemable;
+    }
+
     function getPackPurchasable(uint256 _packid) external view returns (bool) {
         PackInfo storage packinfo = packInfo[_packid];
         return packinfo.purchasable;
+    }
+
+    // Set Pack purchasable with BNB tokens
+    function setPackPurchasable(uint256 _packid, bool _purchasable) public onlyAuthorized {
+
+        PackInfo storage packinfo = packInfo[_packid];
+
+       packinfo.purchasable = _purchasable;
     }
 
     function getPackMintLimit(uint256 _packid) external view returns (uint256) {
         PackInfo storage packinfo = packInfo[_packid];
         return packinfo.mintLimit;
     }
+
+    // Set Pack mint limit
+    function setPackMintLimit(uint256 _packid, uint256 _limit) public onlyAuthorized {
+
+        PackInfo storage packinfo = packInfo[_packid];
+
+        require(_limit > 0, "Mint limit must be greater than zero");
+
+       packinfo.mintLimit = _limit;
+    }
+
 
     function getPackTotalMints(uint256 _packid) external view returns (uint256) {
         return PackNFTmints[_packid];
