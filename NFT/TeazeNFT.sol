@@ -11,17 +11,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-//To Do: provide function that removes collections 
-//Removing a collection needs to accomplish the following:
-//-remove collection in struct (is re-arrangement necessary?)
-//-set all NFT assigned to that collection to unassigned
-//-set collection[name] to false
-
 //Update functions to edit packs/nfts
 //Provide interface for marketplace/lootbox contract to interact with
-
-//sort out whitelist/authorized situation, i.e. will we allow outsiders to create packs/nft and add to the sytem?
-
 
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
@@ -107,7 +98,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
-    mapping(uint => uint256[]) private PackIDS; // array of NFT ID's listed under each pack.
+    mapping(uint => uint256[]) private PackNFTids; // array of NFT ID's listed under each pack.
     mapping(uint => uint256) private PackNFTmints; //number of NFT minted from a certain pack.
     mapping(string => uint) private NFTmintedCountURI;  // Get total # minted by URI.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
@@ -131,7 +122,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         require(PackNFTmints[_packid] < packinfo.mintLimit, "This NFT Pack has reached its mint limit");
 
         //Randomizing mint starts here
-        uint packlength = PackIDS[_packid].length;
+        uint packlength = PackNFTids[_packid].length;
 
         require(packlength >= 3, "Not enough NFTs in this pack to mint from");
 
@@ -141,10 +132,10 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         for (uint256 x = 0; x < packlength; ++x) { //for each NFTID in the pack
 
-            NFTInfo memory tempnftinfo = nftInfo[PackIDS[_packid][x]]; //should be NFT info of each nft in for loop
+            NFTInfo memory tempnftinfo = nftInfo[PackNFTids[_packid][x]]; //should be NFT info of each nft in for loop
 
             for(uint256 y = 0; y < tempnftinfo.mintPercent; y++) {
-                array[y] = PackIDS[_packid][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
+                array[y] = PackNFTids[_packid][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
             }
 
         }
@@ -243,8 +234,9 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         require(whitelisted[_msgSender()], "Sender is not whitelisted"); 
         require(bytes(_nftName).length > 0, "NFT name string must not be empty");
         require(bytes(_URI).length > 0, "URI string must not be empty");
+        require(_packID > 0, "Pack does not exist");
         require(packs[_packID], "Pack does not exist");
-        require(_mintClass >= 0, "mint class must be an integer equal to or greater than zero");
+        require(_mintClass > 0, "mint class must be an integer greater than zero");
         require(_mintPercent > 0, "mint percent must be an integer greater than zero");
         require(!NFTuriExists[_URI], "An NFT with this URI already exists");
 
@@ -271,7 +263,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
             //To Do: if this NFT is inserted into the wrong pack, provide function that deletes from current pack and adds to correct pack
 
-            PackIDS[_packID].push(_nftid);
+            PackNFTids[_packID].push(_nftid);
 
         return  _nftid; 
 
@@ -285,7 +277,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     // Get all NFT IDs added to a pack, and return the mint percentage total
     function getAllNFTbyPack(uint256 _packid) public view returns (uint256[] memory, string[] memory, uint256) {
 
-        uint packlength = PackIDS[_packid].length;
+        uint packlength = PackNFTids[_packid].length;
 
         uint256[] memory ids = new uint256[](packlength);
         string[] memory name = new string[](packlength);
@@ -294,7 +286,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         for (uint256 x = 0; x < packlength; ++x) {          
 
-            NFTInfo storage nftinfo = nftInfo[PackIDS[_packid][x]];
+            NFTInfo storage nftinfo = nftInfo[PackNFTids[_packid][x]];
             count = count.add(1);
             ids[count] = x;
             name[count] = nftinfo.nftName;
@@ -337,6 +329,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
         //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchaseable, exists  
 
+        collections[packinfo.collectionName] = false;
+
         packinfo.packCreatorAddress = packinfocopy.packCreatorAddress;
         packinfo.collectionName = packinfocopy.collectionName;
         packinfo.packID = packinfocopy.packID;
@@ -367,24 +361,63 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     function assignAllNFTtoPack(uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) internal returns (bool) {
 
-        uint packfromlength = PackIDS[_packIDfrom].length;
+        require(packs[_packIDfrom], "Pack from does not exist");
+        require(packs[_packIDto], "Pack to does not exist");
+
+        uint packfromlength = PackNFTids[_packIDfrom].length;
 
         for (uint256 x = 0; x < packfromlength; ++x) {          
 
-            NFTInfo storage nftinfo = nftInfo[PackIDS[_packIDfrom][x]];
+            NFTInfo storage nftinfo = nftInfo[PackNFTids[_packIDfrom][x]];
             
             nftinfo.packID = _packIDto;
             nftinfo.lootboxable = _lootboxable;
 
             //remove all NFT in 'from' pack
-            PackIDS[_packIDfrom][x].pop();
+            PackNFTids[_packIDfrom].pop();
 
             //add NFT to 'to' pack mapping, will be created if it doesn't exist
-            PackIDS[_packIDto].push(PackIDS[_packIDfrom][x]);
+            PackNFTids[_packIDto].push(PackNFTids[_packIDfrom][x]);
            
         }
 
         return (true);
+    }
+
+    function reassignNFTtoPack(uint256 _nftid, uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) internal returns (bool) {
+
+        require(packs[_packIDfrom], "Pack from does not exist");
+        require(packs[_packIDto], "Pack to does not exist");
+
+        uint packfromlength = PackNFTids[_packIDfrom].length;
+
+        NFTInfo storage nftinfo = nftInfo[_nftid];
+
+           for (uint256 x = 0; x < packfromlength; ++x) { //remove from old pack
+
+               if (PackNFTids[nftinfo.packID][x] == _nftid) {
+
+                   if(x == packfromlength-1) { //last in array, pop
+
+                   PackNFTids[nftinfo.packID].pop();
+
+                   } else { //copy last in array to this, then pop last
+
+                   PackNFTids[nftinfo.packID][x] = PackNFTids[nftinfo.packID][packfromlength-1]; 
+                   PackNFTids[nftinfo.packID].pop(); 
+
+                   }
+
+               }
+
+           }
+
+           nftinfo.packID = _packIDto; //add to new pack in NFT struct
+           nftinfo.lootboxable = _lootboxable;
+           PackNFTids[_packIDto].push(_nftid); //add NFT to pack struct
+
+        return (true);
+        
     }
 
     function assignAllNFTtoPackAuth(uint256 _packIDfrom, uint256 _packIDto, bool _lootboxable) external onlyAuthorized returns (bool) {
@@ -402,20 +435,20 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
            NFTuriExists[nftinfo.uri] = false;
 
-           uint packfromlength = PackIDS[nftinfo.packID].length;
+           uint packfromlength = PackNFTids[nftinfo.packID].length;
 
            for (uint256 x = 0; x < packfromlength; ++x) {   
 
-               if (PackIDS[nftinfo.packID][x] == _nftid) {
+               if (PackNFTids[nftinfo.packID][x] == _nftid) {
 
                    if(x == packfromlength-1) { //last in array, pop
 
-                   PackIDS[nftinfo.packID][x].pop();
+                   PackNFTids[nftinfo.packID].pop();
 
                    } else { //copy last in array to this, then pop last
 
-                   PackIDS[nftinfo.packID][x] = PackIDS[nftinfo.packID][packfromlength-1]; 
-                   PackIDS[nftinfo.packID][packfromlength-1].pop(); 
+                   PackNFTids[nftinfo.packID][x] = PackNFTids[nftinfo.packID][packfromlength-1]; 
+                   PackNFTids[nftinfo.packID].pop(); 
 
                    }
 
@@ -441,9 +474,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
            nftinfo.lootboxable = false;
            nftinfo.exists = false;
 
-           _NFTIds.decrement();
-
-           
+           _NFTIds.decrement();          
        
     }
 
@@ -454,8 +485,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
 
-    // Set NFT creator name
-    function setNFTName(uint256 _nftid, string memory _name) public onlyAuthorized {
+    // Set NFT name
+    function setNFTName(uint256 _nftid, string memory _name) external onlyAuthorized {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
@@ -470,18 +501,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         return nftinfo.uri;
     }
 
-    // Set NFT packID
-    function setNFTPackID(uint256 _nftid, uint256 _packid) public onlyAuthorized {
-
-        NFTInfo storage nftinfo = nftInfo[_nftid];
-
-        require(packs[_packid], "Pack does not exist");   
-
-       nftinfo.packID = _packid;
-    }
-
     // Set NFT URI string
-    function setNFTUri(uint256 _nftid, string memory _uri) public onlyAuthorized {
+    function setNFTUri(uint256 _nftid, string memory _uri) external onlyAuthorized {
 
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
@@ -513,8 +534,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     
     function packExists(uint256 _packid) external view returns (bool) {
-        PackInfo storage packinfo = packInfo[_packid];
-        return packinfo.exists;
+        
+        return packs[_packid];
     }
 
     function nftExists(uint256 _nftid) external view returns (bool) {
@@ -580,6 +601,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     // Set cost of opening a pack
     function setPackPrice(uint256 _packid, uint256 _price, uint256 _sbxprice) public onlyAuthorized {
 
+         require(packs[_packid], "Pack does not exist");
+
         PackInfo storage packinfo = packInfo[_packid];
 
         require(_price > 0, "BNB price must be greater than zero");
@@ -597,6 +620,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     // Set NFT redeemable with SimpBux
     function setPackRedeemable(uint256 _packid, bool _redeemable) public onlyAuthorized {
 
+         require(packs[_packid], "Pack does not exist");
+
         PackInfo storage packinfo = packInfo[_packid];
 
        packinfo.redeemable = _redeemable;
@@ -610,6 +635,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     // Set Pack purchasable with BNB tokens
     function setPackPurchasable(uint256 _packid, bool _purchasable) public onlyAuthorized {
 
+        require(packs[_packid], "Pack does not exist");
+
         PackInfo storage packinfo = packInfo[_packid];
 
        packinfo.purchasable = _purchasable;
@@ -622,6 +649,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     // Set Pack mint limit
     function setPackMintLimit(uint256 _packid, uint256 _limit) public onlyAuthorized {
+
+        require(packs[_packid], "Pack does not exist");
 
         PackInfo storage packinfo = packInfo[_packid];
 
