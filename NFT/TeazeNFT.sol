@@ -14,6 +14,11 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 //Update functions to edit packs/nfts
 //Provide interface for marketplace/lootbox contract to interact with
 
+//Add functions to update new variables
+//Need view function for wallet NFT lootbox validation
+//Need view function for unclaimed lootboxes
+//Need view function fot claimed lootboxes
+
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
 
@@ -69,6 +74,9 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     Counters.Counter private _tokenIds;
     Counters.Counter private _PackIds; //so we can track which Packs have been added to the system
     Counters.Counter private _NFTIds; //so we can track which NFT's have been added to the Packs
+    Counters.Counter private _LootBoxIds; //so we can track amount of lootboxes in creation
+    Counters.Counter public unclaimedBoxes; //so we can limit the amount of active unclaimed lootboxes
+    Counters.Counter public claimedBoxes; //so we can track the total amount of claimed lootboxes
 
     struct PackInfo { //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchaseable, exists
         address packCreatorAddress; //wallet address of the Pack creator
@@ -94,11 +102,24 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         bool exists;
     }
 
+    struct LootboxInfo {
+        uint256 rollNumber; //number needed to claim reward
+        uint256 rewardAmount; //amount of BNB in lootbox
+        uint256 collectionArray; //array of NFT id's needed to claim
+        uint256 percentTotal; //total percent of combined NFT mintPercent
+        uint256 mintclassTotal; //total mintclass (higher mintclass = higher bnb reward)
+        address claimedBy; //address that unlocked the lootbox
+        bool claimed; //unclaimed = false, claimed = true
+    }
+
     mapping (string => bool) private collections; //Whether the collection name exists or not.
     mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
+    mapping(uint256 => LootboxInfo) public lootboxInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint => uint256[]) private PackNFTids; // array of NFT ID's listed under each pack.
+    mapping(uint256 => uint256[]) private LootboxNFTids; // array of NFT ID's listed under each lootbox.
+    mapping (uint256 => bool) private claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
     mapping(uint => uint256) private PackNFTmints; //number of NFT minted from a certain pack.
     mapping(string => uint) private NFTmintedCountURI;  // Get total # minted by URI.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
@@ -107,12 +128,22 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
 
     address public farmingContract; // Address of the associated farming contract.
     uint private minted;
+    uint256 private heldAmount = 0;
+    uint256 public maxRewardAmount = 300000000000000006;
+    uint256 public rewardPerClass = 33333333333333334;
+    uint public nftPerLootbox = 3;
+    uint public lootboxdogMax = 90;
+    uint256 rollFee = 0.001 ether;
+    uint256 unclaimedLimiter = 30; //sets total number of unclaimed lootboxes that can be active at any given time
 
     constructor() ERC721("CryptezeNFT", "TeazeNFT") {}
 
     receive() external payable {}
 
     function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
+
+        uint256 nftbalance = ERC721(this).balanceOf(_recipient);
+        require(nftbalance < 100, "Each wallet has a limit of 100 TeazeNFT. Your wallet is at this limit");
 
         require(address(farmingContract) != address(0), "Farming contract address is invalid");
         require(msg.sender == address(farmingContract), "Minting not allowed outside of the farming contract");
@@ -163,6 +194,8 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         NFTmintedCountID[nftid] = NFTmintedCountID[nftid] + 1;
 
         PackNFTmints[_packid] = PackNFTmints[_packid] + 1;
+
+        if (unclaimedBoxes.current() <= unclaimedLimiter) {checkIfLootbox();}
 
         return newItemId;
 
@@ -496,7 +529,7 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     }
 
     // Get NFT URI string
-    function getNFTURI(uint256 _nftid) external view returns (string memory) {
+    function getNFTURI(uint256 _nftid) public view returns (string memory) {
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.uri;
     }
@@ -677,6 +710,143 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         uint256 userPrice = price.add(purchases.mul(priceStep));
 
         return userPrice;
+    }
+
+    function checkIfLootbox() internal {
+        uint256 previousBalance = address(this).balance;
+
+        if (previousBalance.sub(heldAmount) >= maxRewardAmount) {
+            //create lootbox
+
+            _LootBoxIds.increment();
+
+            uint256 lootboxid = _LootBoxIds.current();
+
+            LootboxInfo storage lootboxinfo = lootboxInfo[lootboxid];
+
+            uint256 packids = _PackIds.current();
+            uint256 mintclassTotals = 0;
+            uint256 percentTotals = 0;
+
+            for (uint256 x = 0; x < nftPerLootbox; ++x) {
+
+                uint256 packroll = uint256(blockhash(block.number-1)) % packids-1; //get a random pack
+                packroll = packroll.add(1); //normalize
+
+                uint packnftlength = PackNFTids[packroll].length;
+
+                for (uint256 y = 0; y < packnftlength; ++y) {
+
+                        uint256 nftroll = uint256(blockhash(block.number-1)) % packnftlength-1; //get a random nft
+    
+                    LootboxNFTids[lootboxid].push(PackNFTids[packroll][nftroll]);
+
+                    NFTInfo storage nftinfo = nftInfo[PackNFTids[packroll][nftroll]];
+
+                    mintclassTotals = mintclassTotals.add(nftinfo.mintClass);
+                    percentTotals = percentTotals.add(nftinfo.mintPercent);
+
+                }
+
+            }
+
+            uint256 boxreward = rewardPerClass.mul(mintclassTotals);
+
+            uint256 boxroll = uint256(blockhash(block.number-1)) % lootboxdogMax; //get box roll 0-89
+            boxroll = boxroll.add(1); //normalize
+
+            lootboxinfo.rollNumber = boxroll;
+            lootboxinfo.collectionArray = lootboxid;
+            lootboxinfo.mintclassTotal = mintclassTotals;
+            lootboxinfo.percentTotal = percentTotals;
+            lootboxinfo.rewardAmount = boxreward;
+            lootboxinfo.claimedBy = address(0);
+            lootboxinfo.claimed = false;
+            
+
+            //update heldAmount
+            heldAmount = heldAmount.add(boxreward);
+
+            unclaimedBoxes.increment();
+        }
+    }
+
+    function checkIfWinnwer(uint256 _lootboxid) external payable nonReentrant returns (bool winner, bool used, uint256 roll, uint256 dogroll) {
+
+        LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
+
+        require(!lootboxinfo.claimed, "SimpCrate has already been claimed");
+        require(msg.value == rollFee, "Please include the roll fee to try and unlock this SimpCrate");
+
+        //check wallet against Simpcrate NFT
+
+        uint256 lootboxlength = LootboxNFTids[_lootboxid].length;
+
+        bool result = false;
+        bool hasNFTresult = true;
+        bool NFTunusedresult = false;
+        uint256[] memory tokens = new uint256[](lootboxlength); //create array 
+        uint256 tokentemp;
+        uint256 userroll = 0;
+
+        for (uint x = 0; x < lootboxlength; x++) {
+
+            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), _lootboxid);
+            hasNFTresult = hasNFTresult && result;
+            tokens[x] = tokentemp;
+            NFTunusedresult = NFTunusedresult || claimed[tokentemp];
+        }
+
+        if (result && !NFTunusedresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
+            userroll = uint256(blockhash(block.number-1)) % 99; 
+            userroll = userroll.add(1);
+
+            if (userroll > lootboxinfo.rollNumber) {
+                //transfer winnings to user, update struct, mark tokenIDs as ineligible for future lootboxes
+                payable(_msgSender()).transfer(lootboxinfo.rewardAmount);
+                heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
+
+                for (uint256 z=0; z<tokens.length; z++) {
+                    claimed[tokens[z]] = true;
+                }
+
+                lootboxinfo.claimed = true;
+                lootboxinfo.claimedBy = _msgSender();
+
+                claimedBoxes.increment();
+                unclaimedBoxes.decrement();
+
+            }
+        }
+
+        payable(this).transfer(rollFee);
+
+        return (hasNFTresult, NFTunusedresult, userroll, lootboxinfo.rollNumber);
+
+    }   
+
+    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootboxid) internal view returns (bool nftpresent, uint256 tokenid) {
+
+        uint256 nftbalance = ERC721(this).balanceOf(_holder);
+        bool result;
+        uint256 token;
+
+         for (uint256 y = 0; y < nftbalance; y++) {
+
+             string memory boxuri = getNFTURI(LootboxNFTids[_lootboxid][_position]);
+             string memory holderuri = tokenURI(tokenOfOwnerByIndex(_holder, y));
+
+            if (keccak256(bytes(boxuri)) == keccak256(bytes(holderuri))) {
+                result = true;
+                token = tokenOfOwnerByIndex(_holder, y);
+            } else {
+                result = false;
+                token = 0;
+            }
+
+        }
+
+        return (result, tokenid);
     }
 }
 
