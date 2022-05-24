@@ -12,13 +12,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165Storage.sol"; 
 
-//Update functions to edit packs/nfts
-//Provide interface for marketplace/lootbox contract to interact with
-
-//Add functions to update new variables
-//Need view function for wallet NFT lootbox validation
 //Need view function for unclaimed lootboxes
-//Need view function fot claimed lootboxes
+//Need view function for claimed lootboxes (with frontend pagination input)
 
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
@@ -78,7 +73,7 @@ interface IERC2981 is IERC165 {
     //          is owed and to whom.
     /// @param _tokenId - the NFT asset queried for royalty information
     /// @param _salePrice - the sale price of the NFT asset specified by _tokenId
-    /// @return receiver - address of who should be sent the royalty payment
+    /// @return royaltyReceiver - address of who should be sent the royalty payment
     /// @return royaltyAmount - the royalty payment amount for _salePrice   
 
     /// @notice Informs callers that this contract supports ERC2981
@@ -152,59 +147,20 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
     address public farmingContract; // Address of the associated farming contract.
     uint private minted;
-    uint256 private heldAmount = 0;
-    uint256 public maxRewardAmount = 300000000000000006;
-    uint256 public rewardPerClass = 33333333333333334;
+    uint256 private heldAmount = 0; //Variable to determine how much BNB is in the contract not allocated to a lootbox
+    uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
+    uint256 public rewardPerClass = 33333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint public nftPerLootbox = 3;
-    uint public lootboxdogMax = 90;
-    uint256 rollFee = 0.001 ether;
-    uint256 unclaimedLimiter = 30; //sets total number of unclaimed lootboxes that can be active at any given time
+    uint public lootboxdogMax = 90; //Maximum roll the lootbox will require to unlock it
+    uint256 public rollFee = 0.001 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
+    uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
 
     uint royaltyNumerator = 1;
-    address public receiver = 0xb629Fb3426877640C6fB6734360D81D719062bF6; 
+    address private royaltyReceiver = address(this); 
 
-    
-    /*
-     *     bytes4(keccak256('balanceOf(address)')) == 0x70a08231
-     *     bytes4(keccak256('ownerOf(uint256)')) == 0x6352211e
-     *     bytes4(keccak256('approve(address,uint256)')) == 0x095ea7b3
-     *     bytes4(keccak256('getApproved(uint256)')) == 0x081812fc
-     *     bytes4(keccak256('setApprovalForAll(address,bool)')) == 0xa22cb465
-     *     bytes4(keccak256('isApprovedForAll(address,address)')) == 0xe985e9c5
-     *     bytes4(keccak256('transferFrom(address,address,uint256)')) == 0x23b872dd
-     *     bytes4(keccak256('safeTransferFrom(address,address,uint256)')) == 0x42842e0e
-     *     bytes4(keccak256('safeTransferFrom(address,address,uint256,bytes)')) == 0xb88d4fde
-     *
-     *     => 0x70a08231 ^ 0x6352211e ^ 0x095ea7b3 ^ 0x081812fc ^
-     *        0xa22cb465 ^ 0xe985e9c5 ^ 0x23b872dd ^ 0x42842e0e ^ 0xb88d4fde == 0x80ac58cd
-     */
     bytes4 private constant _INTERFACE_ID_ERC721 = 0x80ac58cd;
-
-    /*
-     *     bytes4(keccak256('name()')) == 0x06fdde03
-     *     bytes4(keccak256('symbol()')) == 0x95d89b41
-     *     bytes4(keccak256('tokenURI(uint256)')) == 0xc87b56dd
-     *
-     *     => 0x06fdde03 ^ 0x95d89b41 ^ 0xc87b56dd == 0x5b5e139f
-     */
     bytes4 private constant _INTERFACE_ID_ERC721_METADATA = 0x5b5e139f;
-
-    /*
-     *     bytes4(keccak256('totalSupply()')) == 0x18160ddd
-     *     bytes4(keccak256('tokenOfOwnerByIndex(address,uint256)')) == 0x2f745c59
-     *     bytes4(keccak256('tokenByIndex(uint256)')) == 0x4f6ccce7
-     *
-     *     => 0x18160ddd ^ 0x2f745c59 ^ 0x4f6ccce7 == 0x780e9d63
-     */
     bytes4 private constant _INTERFACE_ID_ERC721_ENUMERABLE = 0x780e9d63;
-
-    /*
-    *      bytes4(keccak256("royaltyInfo(uint256,uint256)")) == 0x2a55205a
-    *      bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
-    *      _registerInterface(_INTERFACE_ID_ERC2981);
-    *
-    */
-
     bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
 
     constructor() ERC721("CryptezeNFT", "TeazeNFT") {
@@ -845,7 +801,7 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
         }
     }
 
-    function checkIfWinnwer(uint256 _lootboxid) external payable nonReentrant returns (bool winner, bool used, uint256 roll, uint256 dogroll) {
+    function ClaimLootbox(uint256 _lootboxid) external payable nonReentrant returns (bool winner, bool used, uint256 roll, uint256 dogroll) {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
@@ -871,7 +827,7 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
             NFTunusedresult = NFTunusedresult || claimed[tokentemp];
         }
 
-        if (result && !NFTunusedresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
+        if (hasNFTresult && !NFTunusedresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
             userroll = uint256(blockhash(block.number-1)) % 99; 
             userroll = userroll.add(1);
 
@@ -899,7 +855,7 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
     }   
 
-    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootboxid) internal view returns (bool nftpresent, uint256 tokenid) {
+    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootboxid) public view returns (bool nftpresent, uint256 tokenid) {
 
         uint256 nftbalance = ERC721(this).balanceOf(_holder);
         bool result;
@@ -923,12 +879,40 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
         return (result, tokenid);
     }
 
+    function checkIfWinnwer(uint256 _lootboxid) external view returns (bool) {
+
+        LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
+
+        //check wallet against Simpcrate NFT
+
+        uint256 lootboxlength = LootboxNFTids[_lootboxid].length;
+
+        bool result = false;
+        bool hasNFTresult = true;
+        bool NFTunusedresult = false;
+        uint256 tokentemp;
+
+        for (uint x = 0; x < lootboxlength; x++) {
+
+            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), _lootboxid);
+            hasNFTresult = hasNFTresult && result;
+            NFTunusedresult = NFTunusedresult || claimed[tokentemp];
+        }
+
+        if ((lootboxinfo.claimed == false) && hasNFTresult && !NFTunusedresult) {return true;} else {return false;}       
+
+    }
+
     function royaltyInfo(uint256 _tokenId, uint256 _salePrice) external view returns(address,uint256){
     
-    uint256 royaltyAmount = _salePrice.mul(royaltyNumerator).div(100);
     _tokenId = _tokenId;
 
-    return (receiver, royaltyAmount);
+        if (royaltyNumerator == 0) {
+            return (royaltyReceiver, 0);
+        } else {
+            uint256 royaltyAmount = _salePrice.mul(royaltyNumerator).div(100);
+            return (royaltyReceiver, royaltyAmount);
+        }
         
     }
 
@@ -937,12 +921,55 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
     }
 
     function setRoyaltyNumerator(uint _number) external onlyOwner {
-        require(_number >= 1 && _number <= 10, "Royalty fee must be no less than 1% and no greater than 10%");
+        require(_number <= 10, "Royalty fee must be no greater than 10%");
         royaltyNumerator = _number;
     } 
 
-     function changeReceiver(address _receiver) external onlyOwner {
-        receiver = _receiver;
+     function changeroyaltyReceiver(address _royaltyReceiver) external onlyOwner {
+        royaltyReceiver = _royaltyReceiver;
     }
+
+    function updateRewardAmounts(uint256 _maxRewardAmount, uint256 _nftPerLootbox, bool _auth) external onlyAuthorized {
+
+        //the larger the _maxRewardAmount the longer it will take the contract to create a lootbox
+        //the more _nftPerLootbox the harder they will be to open, taking longer for users to collect the appropriate NFTs
+
+        //we can set some limitations here or override them with _auth = true
+
+        if (!_auth) {
+            require(_maxRewardAmount < 0.5 ether, "Max reward size for auto-generated lootboxes must be <= .5 BNB");
+            require(_nftPerLootbox <= 5, "Max random nft per lootbox must be <= 5 TeazeNFT");
+        }
+
+        maxRewardAmount = _maxRewardAmount;
+        nftPerLootbox = _nftPerLootbox;
+
+        rewardPerClass = maxRewardAmount.div(nftPerLootbox);
+
+    }
+
+    function changeLootboxDogMax(uint256 _dogroll) external onlyAuthorized {
+        require(_dogroll >= 50, "Dog roll should be at least 50% to beat");
+        require(_dogroll <= 90, "Dog roll should not be more than 90% to beat");
+
+        lootboxdogMax = _dogroll;
+    }
+
+    function changeRollFee(uint256 _rollFee) external onlyAuthorized {
+        require(_rollFee >= 0 && _rollFee <= 0.01 ether, "Roll fee should be between 0 and 0.01 BNB");
+
+        rollFee = _rollFee;
+    }
+
+    function changeUnclaimedLimiter(uint256 _limit, bool _auth) external onlyAuthorized {
+
+        if (!_auth) {
+            require(_limit <= 50, "Upper limit of unclaimed lootboxes should be 50 or less");
+        }
+
+        unclaimedLimiter = _limit;
+        
+    }
+    
 }
 
