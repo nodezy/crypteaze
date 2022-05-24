@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/introspection/ERC165Storage.sol"; 
 
 //Update functions to edit packs/nfts
 //Provide interface for marketplace/lootbox contract to interact with
@@ -66,7 +67,30 @@ contract Whitelisted is Ownable, Authorizable {
 
 }
 
-abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ReentrancyGuard  {
+///
+/// @dev Interface for the NFT Royalty Standard
+///
+interface IERC2981 is IERC165 {
+    /// ERC165 bytes to add to interface array - set in parent contract
+    /// implementing this standard
+    ///
+    /// @notice Called with the sale price to determine how much royalty
+    //          is owed and to whom.
+    /// @param _tokenId - the NFT asset queried for royalty information
+    /// @param _salePrice - the sale price of the NFT asset specified by _tokenId
+    /// @return receiver - address of who should be sent the royalty payment
+    /// @return royaltyAmount - the royalty payment amount for _salePrice   
+
+    /// @notice Informs callers that this contract supports ERC2981
+    /// @dev If `_registerInterface(_INTERFACE_ID_ERC2981)` is called
+    ///      in the initializer, this should be automatic
+    /// @param interfaceID The interface identifier, as specified in ERC-165
+    /// @return `true` if the contract implements
+    ///         `_INTERFACE_ID_ERC2981` and `false` otherwise
+    function supportsInterface(bytes4 interfaceID) external override view returns (bool);
+}
+
+contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC165Storage, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -136,9 +160,59 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
     uint256 rollFee = 0.001 ether;
     uint256 unclaimedLimiter = 30; //sets total number of unclaimed lootboxes that can be active at any given time
 
-    constructor() ERC721("CryptezeNFT", "TeazeNFT") {}
+    uint royaltyNumerator = 1;
+    address public receiver = 0xb629Fb3426877640C6fB6734360D81D719062bF6; 
+
+    
+    /*
+     *     bytes4(keccak256('balanceOf(address)')) == 0x70a08231
+     *     bytes4(keccak256('ownerOf(uint256)')) == 0x6352211e
+     *     bytes4(keccak256('approve(address,uint256)')) == 0x095ea7b3
+     *     bytes4(keccak256('getApproved(uint256)')) == 0x081812fc
+     *     bytes4(keccak256('setApprovalForAll(address,bool)')) == 0xa22cb465
+     *     bytes4(keccak256('isApprovedForAll(address,address)')) == 0xe985e9c5
+     *     bytes4(keccak256('transferFrom(address,address,uint256)')) == 0x23b872dd
+     *     bytes4(keccak256('safeTransferFrom(address,address,uint256)')) == 0x42842e0e
+     *     bytes4(keccak256('safeTransferFrom(address,address,uint256,bytes)')) == 0xb88d4fde
+     *
+     *     => 0x70a08231 ^ 0x6352211e ^ 0x095ea7b3 ^ 0x081812fc ^
+     *        0xa22cb465 ^ 0xe985e9c5 ^ 0x23b872dd ^ 0x42842e0e ^ 0xb88d4fde == 0x80ac58cd
+     */
+    bytes4 private constant _INTERFACE_ID_ERC721 = 0x80ac58cd;
+
+    /*
+     *     bytes4(keccak256('name()')) == 0x06fdde03
+     *     bytes4(keccak256('symbol()')) == 0x95d89b41
+     *     bytes4(keccak256('tokenURI(uint256)')) == 0xc87b56dd
+     *
+     *     => 0x06fdde03 ^ 0x95d89b41 ^ 0xc87b56dd == 0x5b5e139f
+     */
+    bytes4 private constant _INTERFACE_ID_ERC721_METADATA = 0x5b5e139f;
+
+    /*
+     *     bytes4(keccak256('totalSupply()')) == 0x18160ddd
+     *     bytes4(keccak256('tokenOfOwnerByIndex(address,uint256)')) == 0x2f745c59
+     *     bytes4(keccak256('tokenByIndex(uint256)')) == 0x4f6ccce7
+     *
+     *     => 0x18160ddd ^ 0x2f745c59 ^ 0x4f6ccce7 == 0x780e9d63
+     */
+    bytes4 private constant _INTERFACE_ID_ERC721_ENUMERABLE = 0x780e9d63;
+
+    /*
+    *      bytes4(keccak256("royaltyInfo(uint256,uint256)")) == 0x2a55205a
+    *      bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
+    *      _registerInterface(_INTERFACE_ID_ERC2981);
+    *
+    */
+
+    bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
+
+    constructor() ERC721("CryptezeNFT", "TeazeNFT") {
+        
+    }
 
     receive() external payable {}
+    
 
     function mint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
 
@@ -847,6 +921,28 @@ abstract contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerab
         }
 
         return (result, tokenid);
+    }
+
+    function royaltyInfo(uint256 _tokenId, uint256 _salePrice) external view returns(address,uint256){
+    
+    uint256 royaltyAmount = _salePrice.mul(royaltyNumerator).div(100);
+    _tokenId = _tokenId;
+
+    return (receiver, royaltyAmount);
+        
+    }
+
+    function getRoyaltyNumerator() external view returns(uint) {
+        return royaltyNumerator;
+    }
+
+    function setRoyaltyNumerator(uint _number) external onlyOwner {
+        require(_number >= 1 && _number <= 10, "Royalty fee must be no less than 1% and no greater than 10%");
+        royaltyNumerator = _number;
+    } 
+
+     function changeReceiver(address _receiver) external onlyOwner {
+        receiver = _receiver;
     }
 }
 
