@@ -12,8 +12,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165Storage.sol"; 
 
-//Need view function for unclaimed lootboxes
-//Need view function for claimed lootboxes (with frontend pagination input)
+//Dev to do: 
+//Convert mintclass manual entry into segments decided by mintPercentage
+//Optimize contract
+//Re-view for errors
 
 // Allows another user(s) to change contract variables
 contract Authorizable is Ownable {
@@ -60,29 +62,6 @@ contract Whitelisted is Ownable, Authorizable {
         whitelisted[_toRemove] = false;
     }
 
-}
-
-///
-/// @dev Interface for the NFT Royalty Standard
-///
-interface IERC2981 is IERC165 {
-    /// ERC165 bytes to add to interface array - set in parent contract
-    /// implementing this standard
-    ///
-    /// @notice Called with the sale price to determine how much royalty
-    //          is owed and to whom.
-    /// @param _tokenId - the NFT asset queried for royalty information
-    /// @param _salePrice - the sale price of the NFT asset specified by _tokenId
-    /// @return royaltyReceiver - address of who should be sent the royalty payment
-    /// @return royaltyAmount - the royalty payment amount for _salePrice   
-
-    /// @notice Informs callers that this contract supports ERC2981
-    /// @dev If `_registerInterface(_INTERFACE_ID_ERC2981)` is called
-    ///      in the initializer, this should be automatic
-    /// @param interfaceID The interface identifier, as specified in ERC-165
-    /// @return `true` if the contract implements
-    ///         `_INTERFACE_ID_ERC2981` and `false` otherwise
-    function supportsInterface(bytes4 interfaceID) external override view returns (bool);
 }
 
 contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC165Storage, ReentrancyGuard {
@@ -135,7 +114,9 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
     mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
-    mapping(uint256 => LootboxInfo) public lootboxInfo; // Info of each NFT artist/infuencer wallet.
+    mapping(uint256 => LootboxInfo) public lootboxInfo; // Info of each lootbox.
+    uint256[] public activelootboxarray; //Array to store each active lootbox id so we can view.
+    uint256[] private inactivelootboxarray; //Array to store each active lootbox id so we can view.
     mapping(uint => uint256[]) private PackNFTids; // array of NFT ID's listed under each pack.
     mapping(uint256 => uint256[]) private LootboxNFTids; // array of NFT ID's listed under each lootbox.
     mapping (uint256 => bool) private claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
@@ -252,10 +233,6 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
     function setFarmingContract(address _address) public onlyAuthorized {
         farmingContract = _address;
-    }
-
-    function getFarmingContract() external view returns (address) {
-        return farmingContract;
     }
 
     function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
@@ -579,14 +556,6 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
         NFTuriExists[_uri] = true;
     }
-
-    //NFT mintClass
-
-    //NFT mintPercent
-
-    //NFT exists
-
-    
     
 
     // Get cost of NFT in staking currency
@@ -798,6 +767,9 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
             heldAmount = heldAmount.add(boxreward);
 
             unclaimedBoxes.increment();
+
+            activelootboxarray.push(packids); //add packid to loopable array for view function
+            
         }
     }
 
@@ -818,10 +790,11 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
         uint256[] memory tokens = new uint256[](lootboxlength); //create array 
         uint256 tokentemp;
         uint256 userroll = 0;
+        uint256 lootbox = _lootboxid; 
 
         for (uint x = 0; x < lootboxlength; x++) {
 
-            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), _lootboxid);
+            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), lootbox);
             hasNFTresult = hasNFTresult && result;
             tokens[x] = tokentemp;
             NFTunusedresult = NFTunusedresult || claimed[tokentemp];
@@ -851,11 +824,24 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
         payable(this).transfer(rollFee);
 
+        uint arraylength = activelootboxarray.length;
+
+        //Remove packid from active array
+        for(uint x = 0; x < arraylength; x++) {
+            if (activelootboxarray[x] == _lootboxid) {
+                activelootboxarray[x] = activelootboxarray[arraylength-1];
+                activelootboxarray.pop();
+            }
+        }       
+
+        //Add packid to inactive array
+        inactivelootboxarray.push(_lootboxid);
+
         return (hasNFTresult, NFTunusedresult, userroll, lootboxinfo.rollNumber);
 
     }   
 
-    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootboxid) public view returns (bool nftpresent, uint256 tokenid) {
+    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
         uint256 nftbalance = ERC721(this).balanceOf(_holder);
         bool result;
@@ -863,7 +849,7 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
          for (uint256 y = 0; y < nftbalance; y++) {
 
-             string memory boxuri = getNFTURI(LootboxNFTids[_lootboxid][_position]);
+             string memory boxuri = getNFTURI(LootboxNFTids[_lootbox][_position]);
              string memory holderuri = tokenURI(tokenOfOwnerByIndex(_holder, y));
 
             if (keccak256(bytes(boxuri)) == keccak256(bytes(holderuri))) {
@@ -901,32 +887,6 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
 
         if ((lootboxinfo.claimed == false) && hasNFTresult && !NFTunusedresult) {return true;} else {return false;}       
 
-    }
-
-    function royaltyInfo(uint256 _tokenId, uint256 _salePrice) external view returns(address,uint256){
-    
-    _tokenId = _tokenId;
-
-        if (royaltyNumerator == 0) {
-            return (royaltyReceiver, 0);
-        } else {
-            uint256 royaltyAmount = _salePrice.mul(royaltyNumerator).div(100);
-            return (royaltyReceiver, royaltyAmount);
-        }
-        
-    }
-
-    function getRoyaltyNumerator() external view returns(uint) {
-        return royaltyNumerator;
-    }
-
-    function setRoyaltyNumerator(uint _number) external onlyOwner {
-        require(_number <= 10, "Royalty fee must be no greater than 10%");
-        royaltyNumerator = _number;
-    } 
-
-     function changeroyaltyReceiver(address _royaltyReceiver) external onlyOwner {
-        royaltyReceiver = _royaltyReceiver;
     }
 
     function updateRewardAmounts(uint256 _maxRewardAmount, uint256 _nftPerLootbox, bool _auth) external onlyAuthorized {
@@ -970,6 +930,28 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
         unclaimedLimiter = _limit;
         
     }
+
+    function viewActiveSimpCrates() external view returns (uint256[] memory lootboxes){
+
+        return activelootboxarray;
+
+    }
+
+    function viewInactiveSimpCrates(uint _startingpoint, uint _length) external view returns (uint256[] memory) {
+
+        uint256[] memory array = new uint256[](_length); 
+
+        //Loop through the segment at the starting point
+        for(uint x = 0; x < _length; x++) {
+          array[x] = inactivelootboxarray[_startingpoint.add(x)];
+        }   
+
+        return array;
+
+    }
     
+    function getInactiveSimpCratesLength() external view returns (uint256) {
+        return inactivelootboxarray.length;
+    }
 }
 
