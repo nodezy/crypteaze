@@ -163,12 +163,13 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
             if (roll == 1000) { //wins jackpot
 
             jackpotWinner = true;
-            payable(_msgSender()).transfer(address(this).balance.mul(80).div(100));
+            payable(_holder).transfer(address(this).balance.mul(80).div(100));
 
             } else {
                 if(address(this).balance > jackpotLimit) {
 
                     uint256 netamount = address(this).balance.mul(20).div(100);
+                    payable(_holder).transfer(netamount);
                     address[] memory path = new address[](2);
 
                     path[0] = WETH;
