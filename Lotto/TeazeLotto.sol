@@ -84,6 +84,14 @@ interface IDEXRouter {
     ) external;
 }
 
+interface IWETH {
+    function deposit() external payable;
+    function transfer(address to, uint value) external returns (bool);
+    function approve(address spender, uint value) external returns (bool);
+    function balanceOf(address owner) external view returns (uint);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+}
+
 contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -93,26 +101,29 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
 
     mapping(address => uint256) public lastSpin; //Mapping for last user spin on the SimpWheel of Fortune
     uint simpWheelBaseReward = 25;
-    uint256 public spinFee = 0.0005 ether; //Fee the contract takes for each attempt at spinning the SimpWheel
+    uint public spinFee = 0.0005 ether; //Fee the contract takes for each attempt at spinning the SimpWheel
     mapping(uint => bool) private lastrand; //Mapping to store bitwise operator for randomness
 
-    address _teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
-
-    IERC20 teazetoken = IERC20(_teazetoken); 
+    address teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
+    address pair;
 
     IDEXRouter router;
     
     address WETH;
 
-    uint256 marketBuyGas = 450000;
+    uint marketBuyGas = 450000;
 
     uint jackpotLimit = 2 ether;
 
-    uint256 spinFrequency = 86400;
+    uint winningPercent = 50;
 
-    constructor(address _farmingContract, address _simpbux, address _router) {
+    uint spinFrequency = 86400;
+
+    uint buyTrigger = 0.001 ether; //Amount of BNB the user will have to pay to trigger a buy if jackpot is over upper limit. This amount will be returned to the user in the same transaction
+
+    constructor(address _farmingContract, address _router, address _pair) {
        farmingContract = _farmingContract;
-       simpbux = IERC20(_simpbux);
+       pair = _pair;
        lastrand[0] = true;
        authorized[owner()] = true;
 
@@ -128,7 +139,7 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
     function SpinSimpWheel(address _holder) external payable nonReentrant returns (uint256 userroll,uint256 simbuxwinnings,bool jackpotwinner) {
 
         bool staked = ITeazeFarm(farmingContract).getUserStaked(_holder);
-        require(msg.sender == address(farmingContract), "Spinning not allowed outside of the farming contract");
+        require(_msgSender() == address(farmingContract), "Spinning not allowed outside of the farming contract");
         require(staked, "User must be staked to spin the SimpWheel of Fortune");
         if(lastSpin[_holder] != 0) {
             require(block.timestamp.sub(lastSpin[_holder]) >= spinFrequency, "Not eligible to spin yet");
@@ -163,19 +174,23 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
             if (roll == 1000) { //wins jackpot
 
             jackpotWinner = true;
-            payable(_holder).transfer(address(this).balance.mul(80).div(100));
+            payable(_holder).transfer(address(this).balance.mul(winningPercent).div(100));
 
             } else {
                 if(address(this).balance > jackpotLimit) {
 
                     uint256 netamount = address(this).balance.mul(20).div(100);
-                    payable(_holder).transfer(netamount);
+                    IWETH(WETH).deposit{value : netamount}();
+                    IWETH(WETH).transfer(pair, netamount);
+
+                    payable(_holder).transfer(buyTrigger);
+
                     address[] memory path = new address[](2);
 
                     path[0] = WETH;
-                    path[1] = _teazetoken;
+                    path[1] = teazetoken;
 
-                    router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:netamount, gas:marketBuyGas}(
+                    router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
                         0,
                         path,
                         address(farmingContract),
@@ -211,6 +226,15 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
 
     function changeSpinFrequency(uint256 _period) external onlyAuthorized {
         spinFrequency = _period;
+    }
+
+    function changeWinningPercent(uint256 _winningPercent) external onlyAuthorized {
+        require(_winningPercent <= 100 && _winningPercent > 0, "Winning percent must be between 1 and 100");
+        winningPercent = _winningPercent;
+    }
+
+    function changeBuyTrigger(uint256 _buyTrigger) external onlyAuthorized {
+        buyTrigger = _buyTrigger;
     }
 
 
