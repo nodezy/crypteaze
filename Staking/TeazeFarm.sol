@@ -12,7 +12,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "./simpbux.sol";
+import "./SimpBux.sol";
 
 interface ITeazeNFT {
   function mint(address to, uint256 id) external;
@@ -149,7 +149,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
-    uint256 public maxTeazeStake = 2000000000000000000; //max stake amount (default 2 billion Teaze).
+    uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2 billion Teaze).
     uint256 public minLPStake = 1000000000000000000000; //min lp stake amount (default 1000 LP tokens).
     uint256 public maxLPStake = 10000000000000000000000; //max lp stake amount (default 10,000 LP tokens).
     uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
@@ -169,8 +169,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     mapping(uint256 => mapping(address => uint256)) public unstakeTimer; // Used to track time since unstake requested.
     mapping(address => uint256) private userBalance; // Balance of SimpBux for each user that survives staking/unstaking/redeeming.
     mapping(address => bool) private promoWallet; // Whether the wallet has received promotional SimpBux.
-    uint256 public totalEarnedLoot; // Total amount of BNB sent for lootboxes.
-    uint256 public totalEarnedPool; // Total amount of BNB used to buy token before being sent to stakepool.
+    uint256 public totalEarnedLoot; //Total amount of BNB sent for lootbox creation.
+    uint256 public totalEarnedPool; //Total amount of BNB used to buy token before being sent to stakepool.
     uint256 public totalEarnedNFT; // Total amount of BNB NFT creation wallet to fund new NFTs.
     mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not.
     
@@ -179,10 +179,10 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
     address public lootboxAddress; //lootbox address
 
-    address _teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
-    
+    address teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
+    address teazelotto = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze lotto address
 
-    IERC20 teazetoken = IERC20(_teazetoken); 
+    IERC20 iteazetoken = IERC20(teazetoken); 
 
     IDEXRouter router;
     
@@ -653,6 +653,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         SimpBuxAddress = _address;
     }
 
+    // Set lootbox address
+     function setlootboxAddress(address _address) external onlyAuthorized {
+        lootboxAddress = _address;
+    }
+
     // Set NFT contract address
      function setNFTMarketingAddress(address _address) external onlyAuthorized {
         NFTmarketing = _address;
@@ -692,17 +697,14 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     }
 
-    // users can also purchase the NFT with $teaze token and the proceeds can be split between the NFT influencer/artist and the staking pool
+    // users can also purchase the NFT with $teaze token and the proceeds can be split between nft creation address, lootbox address, and the staking pool
     function purchase(uint256 _packid) public payable nonReentrant {
         
-        uint256 packTotalPrice = ITeazeNFT(NFTcontract).getUserPackPrice(_msgSender(), _packid);
         bool packPurchasable = ITeazeNFT(NFTcontract).getPackPurchasable(_packid);
         uint256 packMinted = ITeazeNFT(NFTcontract).getPackTotalMints(_packid);
         uint256 packMintLimit = ITeazeNFT(NFTcontract).getPackMintLimit(_packid);
 
-        uint256 price = packTotalPrice;
-
-        if(userStaked[0][_msgSender()] || userStaked[1][_msgSender()]) {price = packTotalPrice.sub(packTotalPrice.mul(stakedDiscount).div(100));}
+        uint256 price = getPackTotalPrice(_msgSender());        
 
         require(packPurchasable, "This NFT is not purchasable with BNB");
         require(packMinted < packMintLimit, "This NFT Pack has reached its mint limit");
@@ -711,11 +713,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
         uint256 netremainder = msg.value.sub(netamount);
         totalEarnedPool = totalEarnedPool + netamount;
-
+    
         address[] memory path = new address[](2);
 
             path[0] = WETH;
-            path[1] = _teazetoken;
+            path[1] = teazetoken;
 
             router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:netamount, gas:marketBuyGas}(
                 0,
@@ -746,6 +748,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     }
 
     function increaseSimpBuxBalance(address _address, uint256 _amount) public onlyAuthorized {
+        userBalance[_address] = userBalance[_address].add(_amount);
+    }
+
+    function increaseSBXBalance(address _address, uint256 _amount) external {
+        require(msg.sender == address(teazelotto), "Function may only be called by the lotto contract");
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
@@ -939,5 +946,21 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         lootboxSplit = _lootboxSplit;
 
     }
+
+    function getUserStaked(address _holder) external view returns (bool) {
+        return userStaked[0][_holder] || userStaked[1][_holder];
+    }
+
+    function getPackTotalPrice(address _holder) public view returns (uint) {
+
+        uint256 packTotalPrice = ITeazeNFT(NFTcontract).getUserPackPrice(_holder, _packid);
+        if(userStaked[0][_holder] || userStaked[1][_holder]) {
+            return packTotalPrice.sub(packTotalPrice.mul(stakedDiscount).div(100));
+        } else {
+            return packTotalPrice;
+        }
+    }
+
+    
     
 }
