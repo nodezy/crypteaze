@@ -15,8 +15,8 @@ contract NFTMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     Counters.Counter private _itemsHeld;
     Counters.Counter private _itemsSold;
 
-    uint256 listingFee = 0.025 ether;
-    uint256 buyingFee = 0.025 ether;
+    uint256 listingFee = 0.0025 ether;
+    uint256 buyingFee = 0.0025 ether;
     
     mapping(uint256 => MarketItem) private idToMarketItem;
     
@@ -40,9 +40,9 @@ contract NFTMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     IERC721 public crypteazeNFT;
     uint256 public feeTotals;
 
-    constructor(address _feeReceiver, address _NFTcontract)  {
+    constructor(address _NFTcontract)  {
 
-      feeReceiver = _feeReceiver;
+      feeReceiver = address(_NFTcontract);
       crypteazeNFT = IERC721(_NFTcontract); //crypteaze nft
 
     }   
