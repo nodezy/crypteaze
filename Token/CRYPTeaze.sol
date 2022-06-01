@@ -149,7 +149,7 @@ contract DividendDistributor is IDividendDistributor {
 
     uint256 public impoundTimelimit = 2592000; //1 month default
     uint256 public minDistribution = 1000000* (10 ** 9); //0.001
-    uint256 public minHoldAmountForRewards = 2500000000 * (10**9); // Must hold 2.5 trillion tokens to receive rewards
+    uint256 public minHoldAmountForRewards = 25000000 * (10**9); // Must hold 2.5 trillion tokens to receive rewards
 
     uint256 currentIndex;
 
@@ -552,7 +552,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     string constant _symbol = "Teaze";
     uint8 constant _decimals = 9;
 
-    uint256 _totalSupply = 100000000000000 * (10 ** _decimals);
+    uint256 _totalSupply = 1000000000000 * (10 ** _decimals);
     uint256 public _maxTxAmountBuy = _totalSupply;
     uint256 public _maxTxAmountSell = _totalSupply; 
     uint256 public _maxWalletToken = _totalSupply; 
@@ -578,10 +578,10 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     uint256 initialBlockLimit = 1;
 
-    uint256 public totalFee = 100; //(10%)
-    uint256 public buybackFee = 300;
-    uint256 public stakepoolFee = 200;
-    uint256 public nftmarketingFee = 300;
+    uint256 public totalFee = 50; //(5%)
+    uint256 public buybackFee = 100;
+    uint256 public stakepoolFee = 100;
+    uint256 public nftmarketingFee = 100;
     uint256 public feeDenominator = 1000;
     uint256 discountOffset = 1;
     uint256 public partnerFeeLimiter = 50;
@@ -589,7 +589,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     address public buybackWallet;
     address public nftMarketingWallet;
-    address public stakePoolWallet;
+    address public stakeFundWallet;
 
     uint256 public totalBuyBack;
     uint256 public totalReflect;
@@ -621,7 +621,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     uint256 walletGas = 40000;
     uint256 depositGas = 350000;
 
-    uint256 public swapThreshold = 10000000000000000; //10M tokens
+    uint256 public swapThreshold = 1000000000000000; //100k tokens
     
     modifier swapping() { inSwap = true; _; inSwap = false; }
 
@@ -653,11 +653,11 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
         buybackWallet = 0x697F1cEF29E55d547313e814EC804B45e5ce0a2E;
         nftMarketingWallet = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4;
-        stakePoolWallet = 0x1fCFa721c1AcA1c97AE8C4254E71b579C1dD3139;
+        stakeFundWallet = 0x1fCFa721c1AcA1c97AE8C4254E71b579C1dD3139;
 
         isFeeExempt[buybackWallet] = true;
         isFeeExempt[nftMarketingWallet] = true;
-        isFeeExempt[stakePoolWallet] = true;
+        isFeeExempt[stakeFundWallet] = true;
 
         _balances[_presaler] = _totalSupply;
         emit Transfer(address(0), _presaler, _totalSupply);
@@ -875,7 +875,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
             if (stakeWalletActive) {
                 amountBNBstake = amountBNB.mul(stakepoolFee).div(feeDenominator);
 
-                (bool successTeam4, /* bytes memory data */) = payable(stakePoolWallet).call{value: amountBNBstake, gas: walletGas}("");
+                (bool successTeam4, /* bytes memory data */) = payable(stakeFundWallet).call{value: amountBNBstake, gas: walletGas}("");
                 require(successTeam4, "Staking pool wallet rejected BNB transfer");
 
                 totalStakepool = totalStakepool.add(amountBNBstake);
@@ -969,16 +969,16 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         stakepoolFee = _stakepoolFee;
     }
     
-    function setFeeReceivers(address _buybackWallet, address _nftMarketingWallet, address _stakePoolWallet) external onlyOwner {
+    function setFeeReceivers(address _buybackWallet, address _nftMarketingWallet, address _stakeFundWallet) external onlyOwner {
         require(_buybackWallet != ZERO, "Charity wallet must not be zero address");
         require(_nftMarketingWallet != ZERO, "NFT reward wallet must not be zero address");
-        require(_stakePoolWallet != ZERO, "Stakepool wallet must not be zero address");
+        require(_stakeFundWallet != ZERO, "Stakepool wallet must not be zero address");
          require(_buybackWallet != DEAD, "Charity wallet must not be dead address");
         require(_nftMarketingWallet != DEAD, "NFT reward wallet must not be dead address");
-        require(_stakePoolWallet != DEAD, "Stakepool wallet must not be dead address");
+        require(_stakeFundWallet != DEAD, "Stakepool wallet must not be dead address");
         buybackWallet = _buybackWallet;
         nftMarketingWallet = _nftMarketingWallet;
-        stakePoolWallet = _stakePoolWallet;
+        stakeFundWallet = _stakeFundWallet;
 
     }
     
