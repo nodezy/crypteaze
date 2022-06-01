@@ -953,5 +953,5 @@ contract TeazeNFT is Ownable, Authorizable, Whitelisted, ERC721Enumerable, ERC16
     function getInactiveSimpCratesLength() external view returns (uint256) {
         return inactivelootboxarray.length;
     }
-}
+} 
 
