@@ -137,15 +137,15 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
 
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
-    uint256 public blocksPerDay = 5000; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
+    uint256 public blocksPerDay = 2500; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
     uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
-    uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2 billion Teaze).
-    uint256 public minLPStake = 1000000000000000000000; //min lp stake amount (default 1000 LP tokens).
-    uint256 public maxLPStake = 10000000000000000000000; //max lp stake amount (default 10,000 LP tokens).
+    uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
+    uint256 public minLPStake = 250000000000000000; //min lp stake amount (default .25 LP tokens).
+    uint256 public maxLPStake = 210000000000000000000; //max lp stake amount (default 210 LP tokens).
     uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 20 SimpBux).
     uint256 public stakedDiscount = 30; //amount the price of a pack mint is discounted if the user is staked (default 30%). 
     uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets. Higher value = higher buyback sent to stakepool (default 50%).
@@ -168,18 +168,19 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     uint256 public totalEarnedNFT; // Total amount of BNB NFT creation wallet to fund new NFTs.
     mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not.
     
-    address public NFTcontract; //NFT contract address
+
     address public SimpBuxAddress; //SimpBux contract address
     address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
     address public lootboxAddress; //lootbox address
     address public packsContract; //SimpPacks
 
-    address teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
-    address teazelotto = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze lotto address
+    
+    address teazelotto; //teaze lotto address
 
-    IERC20 iteazetoken = IERC20(teazetoken); 
+    address teazetoken; //teaze token
+    IERC20 iteazetoken; 
 
-    IDEXRouter router;
+    IDEXRouter public router;
     
     address WETH;
 
@@ -193,6 +194,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     constructor(
         SimpBux _simpbux,
         uint256 _startBlock,
+        address _teazetoken,
         address _router
     ) {
         require(address(_simpbux) != address(0), "SimpBux address is invalid");
@@ -201,6 +203,10 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
         simpbux = _simpbux;
         SimpBuxAddress = address(_simpbux);
         startBlock = _startBlock;
+        teazetoken = _teazetoken;
+        iteazetoken = IERC20(teazetoken); 
+
+        addAuthorized(owner());
 
         router = _router != address(0)
             ? IDEXRouter(_router)
@@ -639,8 +645,13 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     }
 
     // Set NFT contract address
-     function setNFTcontract(address _address) external onlyAuthorized {
-        NFTcontract = _address;
+     function setpacksContract(address _address) external onlyAuthorized {
+        packsContract = _address;
+    }
+
+    // Set NFT contract address
+     function setPacksContract(address _address) external onlyAuthorized {
+        packsContract = _address;
     }
 
     // Set SimpBux contract address
@@ -661,6 +672,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     //redeem the NFT with SimpBux only
     function redeem(uint256 _packid) public nonReentrant {
 
+        require(packsContract != address(0), "Packs address invalid");
+
         uint256 packMinted = ITeazePacks(packsContract).mintedCountbyID(_packid);
    
         (,,uint256 packSimpBuxPrice,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(packsContract).getPackInfo(_packid);
@@ -678,13 +691,13 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
             
             IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
             require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-            ITeazePacks(NFTcontract).premint(_msgSender(), _packid);
+            ITeazePacks(packsContract).premint(_msgSender(), _packid);
             IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
         } else {
 
             require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
-            ITeazePacks(NFTcontract).premint(_msgSender(), _packid);
+            ITeazePacks(packsContract).premint(_msgSender(), _packid);
             userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
         }
@@ -694,9 +707,11 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     // users can also purchase the NFT with $teaze token and the proceeds can be split between nft creation address, lootbox address, and the staking pool
     function purchase(uint256 _packid) public payable nonReentrant {
 
+        require(packsContract != address(0), "Packs address invalid");
+
         (,,,uint256 packMintLimit,, bool packPurchasable) = ITeazePacks(packsContract).getPackInfo(_packid);
         
-        uint256 packMinted = ITeazePacks(NFTcontract).getPackTotalMints(_packid);
+        uint256 packMinted = ITeazePacks(packsContract).getPackTotalMints(_packid);
 
         uint256 price = getPackTotalPrice(_msgSender(), _packid);        
 
@@ -720,8 +735,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
                 block.timestamp
             );
 
-        ITeazePacks(NFTcontract).premint(_msgSender(), _packid);
-        ITeazePacks(NFTcontract).packPurchased(_msgSender(),_packid);
+        ITeazePacks(packsContract).premint(_msgSender(), _packid);
+        ITeazePacks(packsContract).packPurchased(_msgSender(),_packid);
 
         payable(NFTmarketing).transfer(netremainder.mul(nftMarketingSplit).div(100));
         totalEarnedNFT = totalEarnedNFT + netremainder.mul(nftMarketingSplit).div(100);
