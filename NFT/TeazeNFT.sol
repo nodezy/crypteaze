@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-//import "./auth.sol";
 
 interface ITeazePacks {
     function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool); 
@@ -91,6 +90,10 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
 
     function setFarmingContract(address _address) public onlyOwner {
         farmingContract = _address;
+    }
+
+    function setPacksContract(address _address) public onlyOwner {
+        packsContract = _address;
     }
 
     
