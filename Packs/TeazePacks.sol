@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./auth.sol";
 
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
@@ -16,52 +17,8 @@ interface ITeazeNFT {
     function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256); 
 }
 
-
-// Allows another user(s) to change contract variables
-contract Authorizable is Ownable {
-
-    mapping(address => bool) public authorized;
-
-    modifier onlyAuthorized() {
-        require(authorized[_msgSender()] || owner() == address(_msgSender()));
-        _;
-    }
-
-    function addAuthorized(address _toAdd) onlyOwner public {
-        require(_toAdd != address(0));
-        authorized[_toAdd] = true;
-        
-    }
-
-    function removeAuthorized(address _toRemove) onlyOwner public {
-        require(_toRemove != address(0));
-        require(_toRemove != address(_msgSender()));
-        authorized[_toRemove] = false;
-    }
-
-}
-
-// Allows authorized users to add creators addresses to the whitelist
-contract Whitelisted is Ownable, Authorizable {
-
-    mapping(address => bool) public whitelisted;
-
-    modifier onlyWhitelisted() {
-        require(whitelisted[_msgSender()] || authorized[_msgSender()] || owner() == address(_msgSender()));
-        _;
-    }
-
-    function addWhitelisted(address _toAdd) onlyAuthorized public {
-        require(_toAdd != address(0));
-        whitelisted[_toAdd] = true;
-    }
-
-    function removeWhitelisted(address _toRemove) onlyAuthorized public {
-        require(_toRemove != address(0));
-        require(_toRemove != address(_msgSender()));
-        whitelisted[_toRemove] = false;
-    }
-
+interface IOracle {
+    function getLatestPrice() external view returns (uint256);
 }
 
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
@@ -69,9 +26,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    Counters.Counter private _PackIds; //so we can track which Packs have been added to the system
-    Counters.Counter private _NFTIds; //so we can track which NFT's have been added to the Packs
-    Counters.Counter private _LootBoxIds; //so we can track amount of lootboxes in creation
+    Counters.Counter public _PackIds; //so we can track which Packs have been added to the system
+    Counters.Counter public _NFTIds; //so we can track which NFT's have been added to the Packs
+    Counters.Counter public _LootBoxIds; //so we can track amount of lootboxes in creation
     Counters.Counter public unclaimedBoxes; //so we can limit the amount of active unclaimed lootboxes
     Counters.Counter public claimedBoxes; //so we can track the total amount of claimed lootboxes
 
@@ -110,19 +67,20 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     mapping (string => bool) private collections; //Whether the collection name exists or not.
+    mapping (string => bool) private nftnames; //Whether the collection name exists or not.
     mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => LootboxInfo) public lootboxInfo; // Info of each lootbox.
     uint256[] public activelootboxarray; //Array to store each active lootbox id so we can view.
     uint256[] private inactivelootboxarray; //Array to store each active lootbox id so we can view.
-    mapping(uint => uint256[]) private PackNFTids; // array of NFT ID's listed under each pack.
-    mapping(uint256 => uint256[]) private LootboxNFTids; // array of NFT ID's listed under each lootbox.
-    mapping (uint256 => bool) private claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
-    mapping(uint => uint256) private PackNFTmints; //number of NFT minted from a certain pack.
-    mapping(address => mapping(uint => uint)) private userPackPurchased; //How many of each pack a certain address has minted.
-     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
-     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
+    mapping(uint => uint256[]) public PackNFTids; // array of NFT ID's listed under each pack.
+    mapping(uint256 => uint256[]) public LootboxNFTids; // array of NFT ID's listed under each lootbox.
+    mapping (uint256 => bool) public claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
+    mapping(uint => uint256) public PackNFTmints; //number of NFT minted from a certain pack.
+    mapping(address => mapping(uint => uint)) public userPackPurchased; //How many of each pack a certain address has minted.
+    mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
+    mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
 
     address public nftContract; // Address of the associated farming contract.
     address public farmingContract; // Address of the associated farming contract.
@@ -131,16 +89,24 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint256 public rewardPerClass = 33333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint public nftPerLootbox = 3;
     uint public lootboxdogMax = 90; //Maximum roll the lootbox will require to unlock it
+    uint randNonce = 0;
     uint256 public rollFee = 0.001 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
     uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
 
-    constructor(address _nftContract) {
+    IOracle public oracle;
+
+    constructor(address _nftContract, address _farmingContract, address _oracle) {
         nftContract = _nftContract;
+        farmingContract = _farmingContract;
+        oracle = IOracle(_oracle);
+        addWhitelisted(owner());
     }
 
     receive() external payable {}
 
     function premint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
+
+        randNonce++;
 
         uint256 nftbalance = IERC721(nftContract).balanceOf(_recipient);
         require(nftbalance <= 100, "E01");
@@ -155,9 +121,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         //Randomizing mint starts here
         uint packlength = PackNFTids[_packid].length;
 
+        uint count = 0;
+
         require(packlength >= 3, "E05");
 
-        uint256 roll = uint256(blockhash(block.number-1)) % 100; //get user roll 0-99
+        uint256 roll = uint256(keccak256(abi.encodePacked(block.timestamp, randNonce, oracle.getLatestPrice()))) % 100; //get user roll 0-99
         
         uint256[] memory array = new uint256[](100); //create array from 0-99
 
@@ -166,13 +134,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             NFTInfo memory tempnftinfo = nftInfo[PackNFTids[_packid][x]]; //should be NFT info of each nft in for loop
 
             for(uint256 y = 0; y < tempnftinfo.mintPercent; y++) {
-                array[y] = PackNFTids[_packid][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
+                array[count] = PackNFTids[_packid][x]; //populate array with # of percentage (ex. 59%, put 59 entries in the array)
+                count++;
             }
 
         }
 
         for (uint256 i = 0; i < array.length; i++) { //now we take our array and scramble the contents
-            uint256 n = i + uint256(keccak256(abi.encodePacked(block.timestamp))) % (array.length - i);
+            uint256 n = i + uint256(keccak256(abi.encodePacked(block.timestamp, randNonce+1, oracle.getLatestPrice()))) % (array.length - i);
             uint256 temp = array[n];
             array[n] = array[i];
             array[i] = temp;
@@ -201,6 +170,10 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     
     function setNFTContract(address _address) public onlyAuthorized {
         nftContract = _address;
+    }
+
+    function setFarmingContract(address _address) public onlyAuthorized {
+        farmingContract = _address;
     }
 
     function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
@@ -241,6 +214,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         require(whitelisted[_msgSender()], "E06"); 
         require(bytes(_nftName).length > 0, "E07");
+        require(!nftnames[_nftName], "E08");
         require(bytes(_URI).length > 0, "E13");
         require(_packID > 0, "E14");
         require(packs[_packID], "E14");
@@ -269,6 +243,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
            nftinfo.exists = true;
 
             NFTuriExists[_URI] = true;
+            nftnames[_nftName] = true;
 
             //To Do: if this NFT is inserted into the wrong pack, provide function that deletes from current pack and adds to correct pack
 
@@ -296,10 +271,10 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         for (uint256 x = 0; x < packlength; ++x) {          
 
             NFTInfo storage nftinfo = nftInfo[PackNFTids[_packid][x]];
-            count = count.add(1);
-            ids[count] = x;
+            ids[count] = PackNFTids[_packid][x];
             name[count] = nftinfo.nftName;
             percentTotal = percentTotal.add(nftinfo.mintPercent);
+            count = count+1;
            
         }
 
@@ -314,14 +289,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         string[] memory name = new string[](totalPacks);
         uint256 count = 0;
 
-        for (uint256 x = 0; x < totalPacks; ++x) {
+        for (uint256 x = 1; x <= totalPacks; ++x) {
 
             PackInfo storage packinfo = packInfo[x];
 
             if (bytes(packinfo.collectionName).length > 0) {
-                count = count.add(1);
                 ids[count] = x;
                 name[count] = packinfo.collectionName;
+                count++;
             }
 
         }
@@ -443,6 +418,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(nftinfo.nftCreatorAddress == address(_msgSender()) || authorized[_msgSender()], "Sender is not creator or authorized");  
 
            NFTuriExists[nftinfo.uri] = false;
+           nftnames[nftinfo.nftName] = false;
 
            uint packfromlength = PackNFTids[nftinfo.packID].length;
 
@@ -575,14 +551,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function packPurchased(address _recipient, uint256 _packid) external {
 
-        require(msg.sender == address(nftContract), "E20");
+        require(msg.sender == address(farmingContract), "E20");
 
         userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
     }
 
     
     // Set cost of opening a pack
-    function setPackPrice(uint256 _packid, uint256 _price, uint256 _sbxprice) public onlyAuthorized {
+    function setPackPrice(uint256 _packid, uint256 _price, uint _priceStep, uint256 _sbxprice) public onlyAuthorized {
 
          require(packs[_packid], "E14");
 
@@ -592,6 +568,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(_sbxprice > 0, "E10");
 
        packinfo.price = _price;
+       packinfo.priceStep = _priceStep;
        packinfo.sbxprice = _sbxprice;
     }
 
@@ -654,47 +631,53 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     function checkIfLootbox() internal {
-        uint256 previousBalance = address(this).balance;
+        
+        randNonce++;
 
-        if (previousBalance.sub(heldAmount) >= maxRewardAmount) {
+        if (heldAmount.add(maxRewardAmount) <= address(this).balance) {
+        
             //create lootbox
 
             _LootBoxIds.increment();
 
             uint256 lootboxid = _LootBoxIds.current();
 
-            LootboxInfo storage lootboxinfo = lootboxInfo[lootboxid];
-
             uint256 packids = _PackIds.current();
+            uint256 packidshunds = packids.mul(100);
             uint256 mintclassTotals = 0;
             uint256 percentTotals = 0;
+            uint256 packroll = 0;
+            uint256 nftroll = 0;
+            
+            //add a check in case NFT pack has no NFTs!
+            
+            for (uint256 x = 1; x <= nftPerLootbox; ++x) {
 
-            for (uint256 x = 0; x < nftPerLootbox; ++x) {
-
-                uint256 packroll = uint256(blockhash(block.number-1)) % packids-1; //get a random pack
-                packroll = packroll.add(1); //normalize
-
-                uint packnftlength = PackNFTids[packroll].length;
-
-                for (uint256 y = 0; y < packnftlength; ++y) {
-
-                        uint256 nftroll = uint256(blockhash(block.number-1)) % packnftlength-1; //get a random nft
-    
-                    LootboxNFTids[lootboxid].push(PackNFTids[packroll][nftroll]);
-
-                    NFTInfo storage nftinfo = nftInfo[PackNFTids[packroll][nftroll]];
-
-                    mintclassTotals = mintclassTotals.add(nftinfo.mintClass);
-                    percentTotals = percentTotals.add(nftinfo.mintPercent);
-
-                }
-
+                packroll = uint256(keccak256(abi.encodePacked(block.timestamp, oracle.getLatestPrice(), x, randNonce))) % packidshunds; //get a random pack
+                packroll = packroll+100;
+                packroll = packroll.div(100);
+            
+                uint256 packnftlength = PackNFTids[packroll].length;
+                uint256 packnftlengthhunds = packnftlength.mul(100);
+                nftroll = uint256(keccak256(abi.encodePacked(block.timestamp, oracle.getLatestPrice(), x+1, randNonce+1))) % packnftlengthhunds; //get a random nft
+                nftroll = nftroll+100;
+                nftroll = nftroll.div(100);
+                nftroll = nftroll.sub(1);
             }
+
+            LootboxNFTids[lootboxid].push(PackNFTids[packroll][nftroll]);
+
+            NFTInfo storage nftinfo = nftInfo[PackNFTids[packroll][nftroll]];
+
+            mintclassTotals = mintclassTotals.add(nftinfo.mintClass);
+            percentTotals = percentTotals.add(nftinfo.mintPercent);            
 
             uint256 boxreward = rewardPerClass.mul(mintclassTotals);
 
-            uint256 boxroll = uint256(blockhash(block.number-1)) % lootboxdogMax; //get box roll 0-89
-            boxroll = boxroll.add(1); //normalize
+            uint256 boxroll = uint256(keccak256(abi.encodePacked(block.timestamp, randNonce, oracle.getLatestPrice()))) % lootboxdogMax; //get box roll 0-89
+            boxroll = boxroll+1; //normalize
+
+            LootboxInfo storage lootboxinfo = lootboxInfo[lootboxid];
 
             lootboxinfo.rollNumber = boxroll;
             lootboxinfo.collectionArray = lootboxid;
@@ -703,14 +686,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             lootboxinfo.rewardAmount = boxreward;
             lootboxinfo.claimedBy = address(0);
             lootboxinfo.claimed = false;
-            
+             
 
             //update heldAmount
             heldAmount = heldAmount.add(boxreward);
 
             unclaimedBoxes.increment();
 
-            activelootboxarray.push(packids); //add packid to loopable array for view function
+            activelootboxarray.push(lootboxid); //add lootboxid to loopable array for view function
             
         }
     }
@@ -807,7 +790,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return (result, tokenid);
     }
 
-    function checkIfWinnwer(uint256 _lootboxid) external view returns (bool) {
+    function checkIfWinnwer(uint256 _lootboxid, address _holder) external view returns (bool) {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
@@ -822,7 +805,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         for (uint x = 0; x < lootboxlength; x++) {
 
-            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), _lootboxid);
+            (result,tokentemp) = checkWalletforNFT(x, _holder, _lootboxid);
             hasNFTresult = hasNFTresult && result;
             NFTunusedresult = NFTunusedresult || claimed[tokentemp];
         }
@@ -894,6 +877,10 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     
     function getInactiveSimpCratesLength() external view returns (uint256) {
         return inactivelootboxarray.length;
+    }
+
+    function mintedCountbyID(uint256 _id) public view returns (uint256) {
+        return NFTmintedCountID[_id];
     }
 }
 
