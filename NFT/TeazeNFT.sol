@@ -27,13 +27,12 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
    
-    address public farmingContract; // Address of the associated farming contract.
     address public packsContract; // Address of the associated farming contract.
     uint private minted;
     
 
-    constructor(address _farming) ERC721("CryptezeNFT", "TeazeNFT") {
-        farmingContract = _farming;
+    constructor(address _packs) ERC721("CryptezeNFT", "TeazeNFT") {
+        packsContract = _packs;
     }
 
     receive() external payable {}
@@ -57,8 +56,8 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
 
     function mint(address _recipient, string memory _uri, uint _packNFTid) public nonReentrant returns (uint256) {
 
-        require(address(farmingContract) != address(0), "Farming contract address is invalid");
-        require(msg.sender == address(farmingContract), "Minting not allowed outside of the farming contract");
+        require(address(packsContract) != address(0), "Packs contract address is invalid");
+        require(msg.sender == address(packsContract), "Minting not allowed outside of the Packs contract");
 
         _tokenIds.increment();
         
@@ -88,9 +87,6 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
         return NFTmintedCountID[_id];
     }
 
-    function setFarmingContract(address _address) public onlyOwner {
-        farmingContract = _address;
-    }
 
     function setPacksContract(address _address) public onlyOwner {
         packsContract = _address;
