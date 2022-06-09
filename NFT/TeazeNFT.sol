@@ -31,8 +31,8 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
     uint private minted;
     
 
-    constructor(address _packs) ERC721("CryptezeNFT", "TeazeNFT") {
-        packsContract = _packs;
+    constructor() ERC721("CryptezeNFT", "TeazeNFT") {
+        
     }
 
     receive() external payable {}
