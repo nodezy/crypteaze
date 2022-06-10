@@ -22,7 +22,7 @@ interface ITeazePacks {
     function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool);   
     function getNFTClass(uint256 _nftid) external view returns (uint256);
     function getNFTPercent(uint256 _nftid) external view returns (uint256);
-
+    function getLootboxAble(uint256 _nftid) external view returns (bool); 
 }
 
 interface ITeazeNFT {
@@ -60,19 +60,23 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     Inserter public inserter;
     ITeazePacks public teazepacks;
     ITeazeNFT public nft;
+
+    address public nftContract; 
     address public packsContract; // Address of the associated farming contract.
     
     uint256 private heldAmount = 0; //Variable to determine how much BNB is in the contract not allocated to a lootbox
     uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
     uint256 public rewardPerClass = 33333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint256 public nftPerLootbox = 3;
-    uint256 public lootboxdogMax = 39; //Maximum roll the lootbox will require to unlock it
+    uint256 public lootboxdogMax = 59; //Maximum roll the lootbox will require to unlock it
+    uint256 public lootboxdogNormalizer = 31;
     uint256 private randNonce;
     uint256 public rollFee = 0.001 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
     uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
     bool public boxesEnabled = true;
 
     constructor(address _packsContract, address _inserter, address _nftcontract) {
+        nftContract =_nftcontract;
         packsContract = _packsContract;
         teazepacks = ITeazePacks(_packsContract);
         nft = ITeazeNFT(_nftcontract);
@@ -108,11 +112,27 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
 
     function checkIfLootbox() public {
-
-        uint256 nftids = teazepacks.getNFTCount();
+        
         //if (heldAmount.add(maxRewardAmount) <= address(this).balance && nftids > 0) {
         if (true) {
-            //create lootbox
+
+            //get 'lootboxable' NFT
+            
+            uint256 count = 0;
+            uint256 nftids = teazepacks.getNFTCount();
+            uint256[] memory lootableNFT = new uint256[](nftids);
+
+            for (uint x=1;x<=nftids;x++) {
+                if (teazepacks.getLootboxAble(x)) {
+                    lootableNFT[count]=x;
+                }
+            }
+
+            uint lootableNFTcount = lootableNFT.length;
+
+            if (lootableNFT.length > 0) {
+
+                //create lootbox
 
             randNonce++;
 
@@ -128,21 +148,22 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             
             for (uint256 x = 1; x <= nftPerLootbox; ++x) {
 
-                nftroll = inserter.getRandMod(randNonce, x, nftids.mul(100)); //get a random nft
+                nftroll = inserter.getRandMod(randNonce, x, lootableNFTcount.mul(100)); //get a random nft
                 nftroll = nftroll+100;
                 nftroll = nftroll.div(100);
+                nftroll = nftroll-1;
 
-                LootboxNFTids[lootboxid].push(nftroll);
+                LootboxNFTids[lootboxid].push(lootableNFT[nftroll]);
 
-                mintclassTotals = mintclassTotals.add(teazepacks.getNFTClass(nftroll));
-                percentTotals = percentTotals.add(teazepacks.getNFTPercent(nftroll));
+                mintclassTotals = mintclassTotals.add(teazepacks.getNFTClass(lootableNFT[nftroll]));
+                percentTotals = percentTotals.add(teazepacks.getNFTPercent(lootableNFT[nftroll]));
                 
             }                  
 
             uint256 boxreward = rewardPerClass.mul(mintclassTotals);
 
             uint256 boxroll = inserter.getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(block.timestamp)))%100), lootboxdogMax); //get box roll 0-89
-            boxroll = boxroll+51; //normalize
+            boxroll = boxroll+lootboxdogNormalizer; //normalize
 
             LootboxInfo storage lootboxinfo = lootboxInfo[lootboxid];
 
@@ -160,6 +181,9 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             unclaimedBoxes.increment();
 
             activelootboxarray.push(lootboxid); //add lootboxid to loopable array for view function
+
+            }
+            
             
         }
     }
@@ -234,7 +258,7 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
-        uint256 nftbalance = IERC721(packsContract).balanceOf(_holder);
+        uint256 nftbalance = IERC721(nftContract).balanceOf(_holder);
         bool result;
         uint256 token;
 
@@ -301,7 +325,7 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function changeLootboxDogMax(uint256 _dogroll) external onlyAuthorized {
         require(_dogroll >= 10, "E25");
-        require(_dogroll <= 39, "E26");
+        require(_dogroll <= 59, "E26");
 
         lootboxdogMax = _dogroll;
     }
