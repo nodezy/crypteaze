@@ -117,11 +117,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         uint count = 0;
 
-        require(packlength >= 3, "E05");
+        //require(packlength >= 3, "E05");
 
-        uint256 roll = inserter.getRandMod(randNonce, _packid, 100); //get user roll 0-99
+        (,,uint256 percentTotal) = getAllNFTbyPack(_packid);
+
+        require(percentTotal >= 100, "E29");
+
+        uint256 roll = inserter.getRandMod(randNonce, _packid, percentTotal); //get user roll 0-99
         
-        uint256[] memory array = new uint256[](100); //create array from 0-99
+        uint256[] memory array = new uint256[](percentTotal); //create array from 0-99
 
         for (uint256 x = 0; x < packlength; ++x) { //for each NFTID in the pack
 
@@ -654,6 +658,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function getNFTPercent(uint256 _nftid) public view returns (uint256) {
          NFTInfo storage nftinfo = nftInfo[_nftid];
         return (nftinfo.mintPercent);
+    }
+
+    function getLootboxAble(uint256 _nftid) public view returns (bool) {
+        NFTInfo storage nftinfo = nftInfo[_nftid];
+        return nftinfo.lootboxable;
     }
  
 
