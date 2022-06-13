@@ -245,6 +245,8 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             } else {
                 //put logic here to expire lootbox and put lootbox reward back into pool for a new one
                 if (block.timestamp > lootboxinfo.timeend) {
+                    claimedBoxes.increment();
+                    unclaimedBoxes.decrement();
                     heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
                     retireLootboxExpired(_lootboxid);
                 }
@@ -418,9 +420,9 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         retireLootbox(_lootboxid);
     }
 
-    function createLootboxAdmin(uint256 _nftid1, uint256 _nftid2, uint256 _nftid3, uint256 _extraRewardAmt) external payable onlyAuthorized {
+    function createLootboxAdmin(uint256 _nftid1, uint256 _nftid2, uint256 _nftid3, uint256 _rewardAmt) external payable onlyAuthorized {
 
-        require(msg.value == _extraRewardAmt, "E31");
+        require(msg.value == _rewardAmt, "E31");
 
         randNonce++;
 
@@ -453,24 +455,24 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             
         }                  
 
-        uint256 boxreward = rewardPerClass.mul(mintclassTotals);
-
         uint256 boxroll = inserter.getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(block.timestamp)))%100), lootboxdogMax); //get box roll 0-89
         boxroll = boxroll+lootboxdogNormalizer; //normalize
 
         LootboxInfo storage lootboxinfo = lootboxInfo[lootboxid];
 
         lootboxinfo.rollNumber = boxroll;
-        lootboxinfo.mintclassTotal = mintclassTotals.add(_extraRewardAmt);
+        lootboxinfo.mintclassTotal = mintclassTotals;
         lootboxinfo.percentTotal = percentTotals;
-        lootboxinfo.rewardAmount = boxreward;
+        lootboxinfo.rewardAmount = _rewardAmt;
         lootboxinfo.timeend = block.timestamp.add(mintclassTotals.mul(timeEnder.mul(timeEndingFactor)).div(100));
         lootboxinfo.claimedBy = address(0);
         lootboxinfo.claimed = false;
             
 
         //update heldAmount
-        heldAmount = heldAmount.add(boxreward);
+        heldAmount = heldAmount.add(_rewardAmt);
+
+        payable(this).transfer(_rewardAmt);
 
         unclaimedBoxes.increment();
 
