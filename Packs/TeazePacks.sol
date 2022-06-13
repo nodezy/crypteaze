@@ -45,6 +45,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint256 priceStep; //how much the price of the NFT should increase in BNB
         uint256 sbxprice; //SimpBux price of minting from the NFT Pack
         uint256 mintLimit; //total amount of this NFT to mint
+        uint256 timeend; //amount of time pack exists before it expires
         bool redeemable; //can be purchased with SimpBux
         bool purchasable; //can be purchased with BNB tokens
         bool exists;
@@ -83,6 +84,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     address public farmingContract; // Address of the associated farming contract.
     
     uint256 private randNonce;
+    uint256 timeEnding = 2592000; //default pack lifetime of 30 days.
     
     constructor(address _nftContract, address _farmingContract, address _inserter, address _simpcrates) {
         nftContract = _nftContract;
@@ -178,7 +180,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         simpcrates = ISimpCrates(_address);
     }
 
-    function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
+    function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, uint256 _timeend, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "E06"); 
         require(bytes(_collectionName).length > 0, "E07");
         require(!collections[_collectionName], "E08");
@@ -200,6 +202,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         packinfo.sbxprice = _sbxprice;
         packinfo.priceStep = _priceStep;
         packinfo.mintLimit = _mintLimit;
+        if (_timeend > 0) {packinfo.timeend = _timeend;} else {packinfo.timeend = block.timestamp.add(timeEnding);}
         packinfo.redeemable = _redeemable; //whether pack can be opened with SBX
         packinfo.purchasable = _purchasable; //whether the pack can be opened with BNB
         packinfo.exists = true;
@@ -664,7 +667,37 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.lootboxable;
     }
- 
+
+    function getNFTExists(uint256 _nftid) public view returns (bool) {
+         NFTInfo storage nftinfo = nftInfo[_nftid];
+        return (nftinfo.exists);
+    }
+
+    function getPackTimelimitFarm(uint256 _packid) public view returns (bool isLive) {
+        bool live = false;
+
+        PackInfo storage packinfo = packInfo[_packid];
+        if (packinfo.timeend < block.timestamp) {
+            live = true;
+            return live;
+        }
+
+
+    }
+    
+    function getPackTimelimitCrates(uint256 _nftid) public view returns (bool isLive) {
+        bool live = false;
+        NFTInfo storage nftinfo = nftInfo[_nftid];
+
+        PackInfo storage packinfo = packInfo[nftinfo.packID];
+        if (packinfo.timeend < block.timestamp) {
+            live = true;
+            return live;
+        }
+
+
+    }
+    
 
 }
 
