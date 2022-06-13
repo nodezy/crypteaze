@@ -240,20 +240,14 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
                 claimedBoxes.increment();
                 unclaimedBoxes.decrement();
 
-                uint arraylength = activelootboxarray.length;
-
-                //Remove lootboxid from active array
-                for(uint x = 0; x < arraylength; x++) {
-                    if (activelootboxarray[x] == _lootboxid) {
-                        activelootboxarray[x] = activelootboxarray[arraylength-1];
-                        activelootboxarray.pop();
-                    }
-                }       
-
                 retireLootbox(_lootboxid);
 
             } else {
                 //put logic here to expire lootbox and put lootbox reward back into pool for a new one
+                if (block.timestamp > lootboxinfo.timeend) {
+                    heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
+                    retireLootboxExpired(_lootboxid);
+                }
             }
         }
 
