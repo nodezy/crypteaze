@@ -22,6 +22,7 @@ interface ITeazePacks {
   function packPurchased(address _recipient, uint256 _nftid) external; 
   function getPackTotalMints(uint256 _packid) external view returns (uint256);
   function getUserPackPrice(address _recipient, uint256 _packid) external view returns (uint256);
+  function getPackTimelimitFarm(uint256 _nftid) external view returns (bool);
 }
 
 interface IDEXRouter {
@@ -73,7 +74,7 @@ interface IDEXRouter {
 }
 
 // Allows another user(s) to change contract variables
-contract Authorizable is Ownable {
+contract Authorized is Ownable {
 
     mapping(address => bool) public authorized;
 
@@ -95,7 +96,7 @@ contract Authorizable is Ownable {
 
 }
 
-contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
+contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     
@@ -673,6 +674,7 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     function redeem(uint256 _packid) public nonReentrant {
 
         require(packsContract != address(0), "Packs address invalid");
+        require(ITeazePacks(packsContract).getPackTimelimitFarm(_packid), "Pack has expired");
 
         uint256 packMinted = ITeazePacks(packsContract).mintedCountbyID(_packid);
    
@@ -708,6 +710,8 @@ contract TeazeFarm is Ownable, Authorizable, ReentrancyGuard {
     function purchase(uint256 _packid) public payable nonReentrant {
 
         require(packsContract != address(0), "Packs address invalid");
+        require(ITeazePacks(packsContract).getPackTimelimitFarm(_packid), "Pack has expired");
+
 
         (,,,uint256 packMintLimit,, bool packPurchasable) = ITeazePacks(packsContract).getPackInfo(_packid);
         
