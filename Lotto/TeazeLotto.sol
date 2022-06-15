@@ -4,11 +4,12 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 // Allows another user(s) to change contract variables
-contract Authorizable is Ownable {
+contract Authorized is Ownable {
 
     mapping(address => bool) public authorized;
 
@@ -34,6 +35,12 @@ contract Authorizable is Ownable {
 interface ITeazeFarm {
     function getUserStaked(address _holder) external view returns (bool);
     function increaseSBXBalance(address _address, uint256 _amount) external;
+}
+
+interface Inserter {
+    function makeActive() external; 
+    function getNonce() external view returns (uint256);
+    function getRandMod(uint256 _extNonce, uint256 _modifier, uint256 _modulous) external view returns (uint256);
 }
 
 interface IDEXRouter {
@@ -92,40 +99,44 @@ interface IWETH {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
 }
 
-contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
+contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
     address farmingContract;
+    address simpCardContract;
     IERC20 simpbux;
 
     mapping(address => uint256) public lastSpin; //Mapping for last user spin on the SimpWheel of Fortune
     uint simpWheelBaseReward = 25;
     uint public spinFee = 0.0005 ether; //Fee the contract takes for each attempt at spinning the SimpWheel
-    mapping(uint => bool) private lastrand; //Mapping to store bitwise operator for randomness
 
-    address teazetoken = 0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C; //teaze token
+    address teazetoken = 0xdD2d44c2776f3e1845c20ce32685A3d73BD44522; //teaze token
     address pair;
 
     IDEXRouter router;
     
     address WETH;
+    Inserter public inserter;
+    uint256 private randNonce;
 
     uint marketBuyGas = 450000;
-
     uint jackpotLimit = 2 ether;
-
     uint winningPercent = 50;
-
     uint spinFrequency = 86400;
+    uint spinFrequencyReduction = 14400;
+    uint spinResultBonus = 10;
+    bool simpCardBonusEnabled = false;
 
     uint buyTrigger = 0.001 ether; //Amount of BNB the user will have to pay to trigger a buy if jackpot is over upper limit. This amount will be returned to the user in the same transaction
 
-    constructor(address _farmingContract, address _router, address _pair) {
+    constructor(address _farmingContract, address _router, address _pair, address _inserter) {
        farmingContract = _farmingContract;
        pair = _pair;
-       lastrand[0] = true;
        authorized[owner()] = true;
+       inserter = Inserter(_inserter);
+       randNonce = inserter.getNonce();
+       inserter.makeActive();
 
        router = _router != address(0)
             ? IDEXRouter(_router)
@@ -148,13 +159,7 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
 
         uint256 roll;
 
-        if(lastrand[0]) {
-            roll = uint256(blockhash(block.number-1)) % 1000; //get user roll 0-99
-            lastrand[0] = false;
-        } else {
-            roll = uint256(keccak256(abi.encodePacked(block.timestamp))) % 1000; //get user roll 0-99
-            lastrand[0] = true;
-        }
+        roll = Inserter(inserter).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_holder)))%100), 1000);
         
         roll = roll.add(1); //normalize 1-1000
 
@@ -162,13 +167,28 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
         bool jackpotWinner = false;
 
         payable(this).transfer(spinFee);
-        lastSpin[_holder] = block.timestamp;
+
+        if (simpCardBonusEnabled) {
+            if (isSimpCardHolder(_holder)) {lastSpin[_holder] = block.timestamp.add(spinFrequencyReduction);} else {lastSpin[_holder] = block.timestamp;}
+        } else {
+            lastSpin[_holder] = block.timestamp;
+        }
+        
 
         if (roll > 499) { //winning of some kind
 
             //(userRoll - 500) + baseReward) / 2 
 
-            userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
+            if (simpCardBonusEnabled) {
+                if (isSimpCardHolder(_holder)) {
+                    userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
+                    userReward = userReward.add(userReward.mul(spinResultBonus.add(100)).div(100));
+                } else {userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);}
+
+            } else {
+                userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
+            }
+            
             ITeazeFarm(farmingContract).increaseSBXBalance(_holder, userReward);
 
             if (roll == 1000) { //wins jackpot
@@ -237,5 +257,32 @@ contract TeazeLotto is Ownable, Authorizable, ReentrancyGuard {
         buyTrigger = _buyTrigger;
     }
 
+    function isSimpCardHolder(address _holder) public view returns (bool) {
+        if (IERC721(simpCardContract).balanceOf(_holder) > 0) {return true;} else {return false;}
+    }
+
+    function changeFarmingContract(address _contract) external onlyAuthorized {
+        require(_contract != address(0), "Farming contract must not be the zero address");
+        farmingContract = _contract;
+    }
+
+    function changeSimpCardContract(address _contract) external onlyAuthorized {
+        require(_contract != address(0), "Farming contract must not be the zero address");
+        simpCardContract = _contract;
+    }
+
+    function changeSpinFrequencyRedux(uint _period) external onlyAuthorized {
+        require(_period <= 43200, "Spin Frequency Reduction must not be greater than 12 hours");
+        spinFrequencyReduction = _period;
+    }
+
+    function changeSpinResultBonus(uint _bonus) external onlyAuthorized {
+        require(_bonus <= 50, "SimpBux bonus cannot be more than 50 percent for SimpCard holders");
+        spinResultBonus = _bonus;
+    }
+
+    function enableSimpCardBonus(bool _status) external onlyAuthorized {
+        simpCardBonusEnabled = _status;
+    }
 
 }
