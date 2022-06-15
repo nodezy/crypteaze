@@ -11,12 +11,38 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+
 interface ITeazePacks {
     function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool); 
     function getPackTotalMints(uint256 _packid) external view returns (uint256); 
+    function getNFTURI(uint256 _nftid) external view returns (string memory);
+    function getPackIDbyNFT(uint256 _nftid) external view returns (uint256);
 }
 
-contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuard {
+// Allows another user(s) to change contract variables
+contract Authorized is Ownable {
+
+    mapping(address => bool) public authorized;
+
+    modifier onlyAuthorized() {
+        require(authorized[_msgSender()] || owner() == address(_msgSender()), "Sender is not authorized");
+        _;
+    }
+
+    function addAuthorized(address _toAdd) onlyOwner public {
+        require(_toAdd != address(0), "Address is the zero address");
+        authorized[_toAdd] = true;
+    }
+
+    function removeAuthorized(address _toRemove) onlyOwner public {
+        require(_toRemove != address(0), "Address is the zero address");
+        require(_toRemove != address(_msgSender()), "Sender cannot remove themself");
+        authorized[_toRemove] = false;
+    }
+
+}
+
+contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -32,6 +58,7 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
     
 
     constructor() ERC721("CryptezeNFT", "TeazeNFT") {
+        addAuthorized(owner());
         
     }
 
@@ -63,6 +90,26 @@ contract TeazeNFT is Ownable, ERC721URIStorage, ERC721Enumerable, ReentrancyGuar
         
         uint256 newItemId = _tokenIds.current();
         _mint(_recipient, newItemId);
+        _setTokenURI(newItemId, _uri);
+
+        NFTmintedCountURI[_uri] = NFTmintedCountURI[_uri] + 1;
+
+        NFTmintedCountID[_packNFTid] = NFTmintedCountID[_packNFTid] + 1;
+
+        return newItemId;
+
+    }
+
+    function adminMint(uint256 _nftid) public onlyAuthorized nonReentrant returns (uint256) {
+
+        require(address(packsContract) != address(0), "Packs contract address is invalid");
+
+        _tokenIds.increment();
+        string memory _uri = ITeazePacks(packsContract).getNFTURI(_nftid);
+        uint256 _packNFTid = ITeazePacks(packsContract).getPackIDbyNFT(_nftid);
+        
+        uint256 newItemId = _tokenIds.current();
+        _mint(_msgSender(), newItemId);
         _setTokenURI(newItemId, _uri);
 
         NFTmintedCountURI[_uri] = NFTmintedCountURI[_uri] + 1;
