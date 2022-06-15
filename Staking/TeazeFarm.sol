@@ -7,6 +7,7 @@ pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
@@ -174,7 +175,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
     address public lootboxAddress; //lootbox address
     address public packsContract; //SimpPacks
-
+    address public simpCardContract;
+    bool simpCardBonusEnabled = false;
+    uint simpCardRedeemDiscount = 10;
     
     address teazelotto; //teaze lotto address
 
@@ -678,12 +681,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         uint256 packMinted = ITeazePacks(packsContract).mintedCountbyID(_packid);
    
-        (,,uint256 packSimpBuxPrice,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(packsContract).getPackInfo(_packid);
+        (,,,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(packsContract).getPackInfo(_packid);
     
         require(packRedeemable, "This NFT is not redeemable with SimpBux");
         require(packMinted < packMintLimit, "This NFT has reached its mint limit");
 
-        uint256 price = packSimpBuxPrice;
+        uint256 price = getSimpCardPackPrice(_packid, _msgSender());
 
         require(price > 0, "NFT not found");
 
@@ -974,6 +977,26 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
+    function enableSimpCardBonus(bool _status) external onlyAuthorized {
+        simpCardBonusEnabled = _status;
+    }
+
+    function isSimpCardHolder(address _holder) public view returns (bool) {
+        if (IERC721(simpCardContract).balanceOf(_holder) > 0) {return true;} else {return false;}
+    }
     
+    function getSimpCardPackPrice(uint _packid, address _holder) public view returns (uint) {
+        (,,uint256 packSimpBuxPrice,,,) = ITeazePacks(packsContract).getPackInfo(_packid);
+        
+        if (simpCardBonusEnabled) {
+                if (isSimpCardHolder(_holder)) {
+                    return packSimpBuxPrice.sub(packSimpBuxPrice.mul(simpCardRedeemDiscount.add(100)).div(100));
+                } else {
+                    return packSimpBuxPrice;
+                }
+        } else {
+           return packSimpBuxPrice;
+        }
+    }
     
 }
