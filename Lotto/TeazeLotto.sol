@@ -103,8 +103,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    address farmingContract;
-    address simpCardContract;
+    address public farmingContract;
+    address public simpCardContract;
     IERC20 simpbux;
 
     mapping(address => uint256) public lastSpin; //Mapping for last user spin on the SimpWheel of Fortune
@@ -117,7 +117,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     IDEXRouter router;
     
     address WETH;
-    Inserter public inserter;
+    Inserter private inserter;
     uint256 private randNonce;
 
     uint marketBuyGas = 450000;
@@ -147,19 +147,19 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     receive() external payable {}
 
 
-    function SpinSimpWheel(address _holder) external payable nonReentrant returns (uint256 userroll,uint256 simbuxwinnings,bool jackpotwinner) {
+    function SpinSimpWheel() external payable nonReentrant returns (uint256 userroll,uint256 simbuxwinnings,bool jackpotwinner) {
 
-        bool staked = ITeazeFarm(farmingContract).getUserStaked(_holder);
-        require(_msgSender() == address(farmingContract), "Spinning not allowed outside of the farming contract");
+        bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
+        //require(_msgSender() == address(farmingContract), "Spinning not allowed outside of the farming contract");
         require(staked, "User must be staked to spin the SimpWheel of Fortune");
-        if(lastSpin[_holder] != 0) {
-            require(block.timestamp.sub(lastSpin[_holder]) >= spinFrequency, "Not eligible to spin yet");
+        if(lastSpin[_msgSender()] != 0) {
+            require(block.timestamp.sub(lastSpin[_msgSender()]) >= spinFrequency, "Not eligible to spin yet");
         }
         require(msg.value == spinFee, "Please include the spin fee to spin the SimpWheel");
 
         uint256 roll;
 
-        roll = Inserter(inserter).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_holder)))%100), 1000);
+        roll = Inserter(inserter).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_msgSender())))%100), 1000);
         
         roll = roll.add(1); //normalize 1-1000
 
@@ -169,9 +169,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         payable(this).transfer(spinFee);
 
         if (simpCardBonusEnabled) {
-            if (isSimpCardHolder(_holder)) {lastSpin[_holder] = block.timestamp.add(spinFrequencyReduction);} else {lastSpin[_holder] = block.timestamp;}
+            if (isSimpCardHolder(_msgSender())) {lastSpin[_msgSender()] = block.timestamp.add(spinFrequencyReduction);} else {lastSpin[_msgSender()] = block.timestamp;}
         } else {
-            lastSpin[_holder] = block.timestamp;
+            lastSpin[_msgSender()] = block.timestamp;
         }
         
 
@@ -180,7 +180,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
             //(userRoll - 500) + baseReward) / 2 
 
             if (simpCardBonusEnabled) {
-                if (isSimpCardHolder(_holder)) {
+                if (isSimpCardHolder(_msgSender())) {
                     userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
                     userReward = userReward.add(userReward.mul(spinResultBonus.add(100)).div(100));
                 } else {userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);}
@@ -189,12 +189,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
             }
             
-            ITeazeFarm(farmingContract).increaseSBXBalance(_holder, userReward);
+            ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward);
 
             if (roll == 1000) { //wins jackpot
 
             jackpotWinner = true;
-            payable(_holder).transfer(address(this).balance.mul(winningPercent).div(100));
+            payable(_msgSender()).transfer(address(this).balance.mul(winningPercent).div(100));
 
             } else {
                 if(address(this).balance > jackpotLimit) {
@@ -203,7 +203,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                     IWETH(WETH).deposit{value : netamount}();
                     IWETH(WETH).transfer(pair, netamount);
 
-                    payable(_holder).transfer(buyTrigger);
+                    payable(_msgSender()).transfer(buyTrigger);
 
                     address[] memory path = new address[](2);
 
@@ -284,5 +284,18 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     function enableSimpCardBonus(bool _status) external onlyAuthorized {
         simpCardBonusEnabled = _status;
     }
+
+    // This will allow to rescue ETH sent by mistake directly to the contract
+    function rescueETHFromContract() external onlyOwner {
+        address payable _owner = payable(_msgSender());
+        _owner.transfer(address(this).balance);
+    }
+
+    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
+    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+       
+        IERC20(_tokenAddr).transfer(_to, _amount);
+    }
+
 
 }
