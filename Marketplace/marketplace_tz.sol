@@ -2,13 +2,14 @@
 pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract NFTMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
+contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
 
@@ -36,14 +37,16 @@ contract NFTMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
       bool sold
     );
 
-    address public feeReceiver;
+    address public feeReceiver; //change to lootbox contract
+    address public packsContract;
     IERC721 public crypteazeNFT;
     uint256 public feeTotals;
 
-    constructor(address _NFTcontract)  {
+    constructor(address _packsContract, address _nftContract)  {
 
-      feeReceiver = address(_NFTcontract);
-      crypteazeNFT = IERC721(_NFTcontract); //crypteaze nft
+      feeReceiver = address(_packsContract);
+      packsContract = address(_packsContract);
+      crypteazeNFT = IERC721(_nftContract); //crypteaze nft
 
     }   
 
@@ -211,4 +214,17 @@ contract NFTMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
      function onERC721Received(address, address, uint256, bytes memory) public virtual override returns (bytes4) {
         return this.onERC721Received.selector;
     }
+
+    // This will allow to rescue ETH sent by mistake directly to the contract
+    function rescueETHFromContract() external onlyOwner {
+        address payable _owner = payable(_msgSender());
+        _owner.transfer(address(this).balance);
+    }
+
+    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
+    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+       
+        IERC20(_tokenAddr).transfer(_to, _amount);
+    }
+
 }
