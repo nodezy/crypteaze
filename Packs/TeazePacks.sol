@@ -78,7 +78,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
 
-    Inserter public inserter;
+    Inserter private inserter;
     ISimpCrates public simpcrates;
     address public nftContract; // Address of the associated farming contract.
     address public farmingContract; // Address of the associated farming contract.
@@ -86,10 +86,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint256 private randNonce;
     uint256 timeEnding = 2592000; //default pack lifetime of 30 days.
     
-    constructor(address _nftContract, address _farmingContract, address _inserter, address _simpcrates) {
+    constructor(address _nftContract, address _farmingContract, address _inserter) {
         nftContract = _nftContract;
         farmingContract = _farmingContract;
-        simpcrates = ISimpCrates(_simpcrates);
         inserter = Inserter(_inserter);
         randNonce = inserter.getNonce();
         inserter.makeActive();
@@ -677,12 +676,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         bool live = false;
 
         PackInfo storage packinfo = packInfo[_packid];
-        if (packinfo.timeend < block.timestamp) {
+        if (packinfo.timeend >= block.timestamp) {
             live = true;
-            return live;
         }
 
-
+        return live;
     }
     
     function getPackTimelimitCrates(uint256 _nftid) public view returns (bool isLive) {
@@ -690,14 +688,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         NFTInfo storage nftinfo = nftInfo[_nftid];
 
         PackInfo storage packinfo = packInfo[nftinfo.packID];
-        if (packinfo.timeend < block.timestamp) {
+        if (packinfo.timeend >= block.timestamp) {
             live = true;
-            return live;
         }
 
+        return live;
 
     }
-    
 
 }
 
