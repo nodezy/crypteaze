@@ -151,6 +151,6 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
        
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
-
+ 
 }
 
