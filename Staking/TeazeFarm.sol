@@ -648,9 +648,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         emit WithdrawRewardsOnly(_msgSender(), pending);
     }
 
-    // Set NFT contract address
-     function setpacksContract(address _address) external onlyAuthorized {
-        packsContract = _address;
+    // Set teazelotto contract address
+     function setLottoContract(address _address) external onlyAuthorized {
+        teazelotto = _address;
     }
 
     // Set NFT contract address
