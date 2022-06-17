@@ -127,6 +127,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint spinFrequencyReduction = 14400;
     uint spinResultBonus = 10;
     bool simpCardBonusEnabled = false;
+    uint winningNumber = 1000;
+    uint overage = 20;
 
     uint buyTrigger = 0.001 ether; //Amount of BNB the user will have to pay to trigger a buy if jackpot is over upper limit. This amount will be returned to the user in the same transaction
 
@@ -149,8 +151,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function SpinSimpWheel() external payable nonReentrant returns (uint256 userroll,uint256 simbuxwinnings,bool jackpotwinner) {
 
+        randNonce++;
+
         bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
-        //require(_msgSender() == address(farmingContract), "Spinning not allowed outside of the farming contract");
+
         require(staked, "User must be staked to spin the SimpWheel of Fortune");
         if(lastSpin[_msgSender()] != 0) {
             require(block.timestamp.sub(lastSpin[_msgSender()]) >= spinFrequency, "Not eligible to spin yet");
@@ -159,7 +163,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         uint256 roll;
 
-        roll = Inserter(inserter).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_msgSender())))%100), 1000);
+        roll = Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 1000);
         
         roll = roll.add(1); //normalize 1-1000
 
@@ -189,17 +193,40 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
             }
             
-            ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward);
+            ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
 
-            if (roll == 1000) { //wins jackpot
+                if(roll >= winningNumber &&address(this).balance > jackpotLimit) {
 
-            jackpotWinner = true;
-            payable(_msgSender()).transfer(address(this).balance.mul(winningPercent).div(100));
+                    uint256 netamount = address(this).balance.mul(overage).div(100);
+                    IWETH(WETH).deposit{value : netamount}();
+                    IWETH(WETH).transfer(pair, netamount);
 
-            } else {
-                if(address(this).balance > jackpotLimit) {
+                    payable(_msgSender()).transfer(buyTrigger);
 
-                    uint256 netamount = address(this).balance.mul(20).div(100);
+                    address[] memory path = new address[](2);
+
+                    path[0] = WETH;
+                    path[1] = teazetoken;
+
+                    router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
+                        0,
+                        path,
+                        address(farmingContract),
+                        block.timestamp
+                    );
+
+                } else {
+
+                    jackpotWinner = true;
+                    payable(_msgSender()).transfer(address(this).balance.mul(winningPercent).div(100));
+                }
+
+            return(roll,userReward,jackpotWinner);
+
+        } else {
+            if(address(this).balance > jackpotLimit) {
+
+                    uint256 netamount = address(this).balance.mul(overage).div(100);
                     IWETH(WETH).deposit{value : netamount}();
                     IWETH(WETH).transfer(pair, netamount);
 
@@ -217,12 +244,6 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                         block.timestamp
                     );
                 }
-            }
-
-            return(roll,userReward,jackpotWinner);
-
-
-        } else {
             return (roll,0, false);
         }       
         
@@ -295,6 +316,16 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
+    }
+
+    function changeWinningNumber(uint _number) external onlyAuthorized {
+        require(_number >= 900, "Winning number should be greater than or equal to 900");
+        winningNumber = _number;
+    }
+
+    function changeOverage(uint _number) external onlyAuthorized {
+        require(_number > 0 && _number <= 50, "Jackpot overage should be between 1 and 50 percent of total");
+        overage = _number;
     }
 
 
