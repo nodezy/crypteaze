@@ -41,6 +41,7 @@ interface Inserter {
     function makeActive() external; 
     function getNonce() external view returns (uint256);
     function getRandMod(uint256 _extNonce, uint256 _modifier, uint256 _modulous) external view returns (uint256);
+    function getRandLotto(uint256 _extNonce, uint256 _modifier) external view returns (uint256);
 }
 
 interface IDEXRouter {
@@ -127,18 +128,19 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint spinFrequencyReduction = 14400;
     uint spinResultBonus = 10;
     bool simpCardBonusEnabled = false;
-    uint winningNumber = 1000;
+    uint winningNumber;
     uint overage = 20;
 
     uint buyTrigger = 0.001 ether; //Amount of BNB the user will have to pay to trigger a buy if jackpot is over upper limit. This amount will be returned to the user in the same transaction
 
-    constructor(address _farmingContract, address _router, address _pair, address _inserter) {
+    constructor(address _farmingContract, address _router, address _pair, address _inserter, uint _winningNumber) {
        farmingContract = _farmingContract;
        pair = _pair;
        authorized[owner()] = true;
        inserter = Inserter(_inserter);
        randNonce = inserter.getNonce();
        inserter.makeActive();
+       winningNumber = _winningNumber;
 
        router = _router != address(0)
             ? IDEXRouter(_router)
@@ -195,30 +197,55 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
             
             ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
 
-                if(roll >= winningNumber &&address(this).balance > jackpotLimit) {
+                if(roll != winningNumber) {
 
-                    uint256 netamount = address(this).balance.mul(overage).div(100);
-                    IWETH(WETH).deposit{value : netamount}();
-                    IWETH(WETH).transfer(pair, netamount);
+                    if (address(this).balance > jackpotLimit) {
+                        uint256 netamount = address(this).balance.mul(overage).div(100);
+                        IWETH(WETH).deposit{value : netamount}();
+                        IWETH(WETH).transfer(pair, netamount);
 
-                    payable(_msgSender()).transfer(buyTrigger);
+                        payable(_msgSender()).transfer(buyTrigger);
 
-                    address[] memory path = new address[](2);
+                        address[] memory path = new address[](2);
 
-                    path[0] = WETH;
-                    path[1] = teazetoken;
+                        path[0] = WETH;
+                        path[1] = teazetoken;
 
-                    router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
-                        0,
-                        path,
-                        address(farmingContract),
-                        block.timestamp
-                    );
+                        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
+                            0,
+                            path,
+                            address(farmingContract),
+                            block.timestamp
+                        );
+                    }
 
                 } else {
 
+                    if (address(this).balance > jackpotLimit) {
+                        uint256 netamount = (address(this).balance.mul(winningPercent).div(100)).mul(overage).div(100);
+                        IWETH(WETH).deposit{value : netamount}();
+                        IWETH(WETH).transfer(pair, netamount);
+
+                        payable(_msgSender()).transfer(buyTrigger);
+
+                        address[] memory path = new address[](2);
+
+                        path[0] = WETH;
+                        path[1] = teazetoken;
+
+                        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
+                            0,
+                            path,
+                            address(farmingContract),
+                            block.timestamp
+                        );
+                    }
+
                     jackpotWinner = true;
                     payable(_msgSender()).transfer(address(this).balance.mul(winningPercent).div(100));
+
+                    winningNumber = Inserter(inserter).getRandLotto(randNonce, roll);
+
                 }
 
             return(roll,userReward,jackpotWinner);
