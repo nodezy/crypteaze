@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
+import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -30,6 +31,11 @@ contract Authorized is Ownable {
         authorized[_toRemove] = false;
     }
 
+}
+
+interface IOracle {
+    function getTeazeUSDPrice() external view returns (uint256, uint256, uint256);
+    function getbnbusdequivalent(uint256 amount) external view returns (uint256);
 }
 
 interface ITeazeFarm {
@@ -103,14 +109,24 @@ interface IWETH {
 contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+    using Counters for Counters.Counter;
+
+    struct priceHistory {
+        uint lastPrice;
+        uint priceTime;
+    }
+
+    Counters.Counter public _historyID;
+
+    IOracle public oracle;
+    mapping(uint256 => priceHistory) public pricehistory; // Info of each NFT artist/infuencer wallet.
+    uint public lastPriceCheck;
+    uint public priceCheckInterval = 60;
+    uint[] priceHistoryArray;
 
     address public farmingContract;
     address public simpCardContract;
     IERC20 simpbux;
-
-    mapping(address => uint256) public lastSpin; //Mapping for last user spin on the SimpWheel of Fortune
-    uint simpWheelBaseReward = 25;
-    uint public spinFee = 0.0005 ether; //Fee the contract takes for each attempt at spinning the SimpWheel
 
     address teazetoken = 0xdD2d44c2776f3e1845c20ce32685A3d73BD44522; //teaze token
     address pair;
@@ -121,25 +137,45 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     Inserter private inserter;
     uint256 private randNonce;
 
-    uint marketBuyGas = 450000;
-    uint jackpotLimit = 2 ether;
-    uint winningPercent = 50;
-    uint spinFrequency = 86400;
-    uint spinFrequencyReduction = 14400;
-    uint spinResultBonus = 10;
-    bool simpCardBonusEnabled = false;
-    uint winningNumber;
-    uint overage = 20;
+    mapping(address => uint256) public lastSpinTime; //Mapping for last user spin on the SimpWheel of Fortune
+    mapping(address => uint256) public lastDailySpin; //Mapping for last user daily spin on the SimpWheel of Fortune
+    mapping(address => uint256) public totalSBX; //Mapping for total SBX won on the SimpWheel of Fortune
+    mapping(address => uint256) public totalSpins; //Mapping for total user spins on the SimpWheel of Fortune
+    mapping(address => uint256) public totalWins; //Mapping for total user wins on the SimpWheel of Fortune
+    mapping(address => uint256) public totalJackpots; //Mapping for total user jackpots on the SimpWheel of Fortune
+    mapping(address => uint256) public totalJackpotsBNB; //Mapping for total user jackpot BNB on the SimpWheel of Fortune
+    
+    uint marketBuyGas = 200000;
+    uint simpWheelBaseReward = 25;
+    uint public feeReduction = 4; //amount we want overrideFee reduced for spin & trigger fees
+    uint public overrideFee = 1;  //override fee in whole USD    
+    uint public jackpotLimit = 2 ether;
+    uint public winningPercent = 50;
+    uint public spinFrequency = 86400;
+    uint public spinFrequencyReduction = 14400;
+    uint public spinResultBonus = 10;
+    bool public simpCardBonusEnabled = false;
+    uint public overage = 10;
+    uint public totalTeaze;
+    uint public globalSpins;
+    uint public globalSBX;
+    uint public globalWins;
+    uint public globalJackpots;
+    uint public globalBNBJackpots;
+    uint public globalBNBTeaze;
+    bool public adminWinner = false; //to test winning jackpot roll, remove for production
+    uint winningNumber; //remove for production
+    
+    event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
 
-    uint buyTrigger = 0.001 ether; //Amount of BNB the user will have to pay to trigger a buy if jackpot is over upper limit. This amount will be returned to the user in the same transaction
-
-    constructor(address _farmingContract, address _router, address _pair, address _inserter, uint _winningNumber) {
+    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint _winningNumber) {
        farmingContract = _farmingContract;
        pair = _pair;
        authorized[owner()] = true;
        inserter = Inserter(_inserter);
        randNonce = inserter.getNonce();
        inserter.makeActive();
+       oracle = IOracle(_oracle);
        winningNumber = _winningNumber;
 
        router = _router != address(0)
@@ -151,17 +187,36 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     receive() external payable {}
 
 
-    function SpinSimpWheel() external payable nonReentrant returns (uint256 userroll,uint256 simbuxwinnings,bool jackpotwinner) {
+    function SpinSimpWheel(bool _override) external payable nonReentrant {
 
         randNonce++;
 
+        globalSpins++;
+
+        totalSpins[_msgSender()] = totalSpins[_msgSender()] + 1;
+        
         bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
 
-        require(staked, "User must be staked to spin the SimpWheel of Fortune");
-        if(lastSpin[_msgSender()] != 0) {
-            require(block.timestamp.sub(lastSpin[_msgSender()]) >= spinFrequency, "Not eligible to spin yet");
+       // require(staked, "User must be staked to spin the SimpWheel of Fortune");
+    
+        if(!_override) {
+            if(lastSpinTime[_msgSender()] != 0) {
+                require(block.timestamp.sub(lastSpinTime[_msgSender()]) >= spinFrequency, "Not eligible to spin yet");
+            }
+            require(msg.value >= returnFeeReduction(overrideFee,feeReduction).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
+            
+            if (simpCardBonusEnabled) {
+                if (isSimpCardHolder(_msgSender())) {lastSpinTime[_msgSender()] = block.timestamp.add(spinFrequencyReduction);} else {lastSpinTime[_msgSender()] = block.timestamp;}
+            } else {
+                lastSpinTime[_msgSender()] = block.timestamp;
+            }
+
+            lastDailySpin[_msgSender()] = totalSpins[_msgSender()];
+
+        } else {
+            uint overrideSpinFee = (totalSpins[_msgSender()].sub(lastDailySpin[_msgSender()])).mul(overrideFee);
+            require(msg.value >= (oracle.getbnbusdequivalent(overrideSpinFee)).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
         }
-        require(msg.value == spinFee, "Please include the spin fee to spin the SimpWheel");
 
         uint256 roll;
 
@@ -169,119 +224,87 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         
         roll = roll.add(1); //normalize 1-1000
 
-        uint256 userReward;
+        uint256 userReward = 0;
         bool jackpotWinner = false;
+        uint jackpotamt = 0;
 
-        payable(this).transfer(spinFee);
+        payable(this).transfer(msg.value);
 
-        if (simpCardBonusEnabled) {
-            if (isSimpCardHolder(_msgSender())) {lastSpin[_msgSender()] = block.timestamp.add(spinFrequencyReduction);} else {lastSpin[_msgSender()] = block.timestamp;}
-        } else {
-            lastSpin[_msgSender()] = block.timestamp;
-        }
         
 
-        if (roll > 499) { //winning of some kind
+        if(roll != winningNumber && !adminWinner) {
 
-            //(userRoll - 500) + baseReward) / 2 
+            if (roll > 499) { //winning of some kind
 
-            if (simpCardBonusEnabled) {
-                if (isSimpCardHolder(_msgSender())) {
-                    userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
-                    userReward = userReward.add(userReward.mul(spinResultBonus.add(100)).div(100));
-                } else {userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);}
+                globalWins++;
 
-            } else {
-                userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
-            }
-            
-            ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
+                totalWins[_msgSender()] = totalWins[_msgSender()] + 1;
 
-                if(roll != winningNumber) {
-
-                    if (address(this).balance > jackpotLimit) {
-                        uint256 netamount = address(this).balance.mul(overage).div(100);
-                        IWETH(WETH).deposit{value : netamount}();
-                        IWETH(WETH).transfer(pair, netamount);
-
-                        payable(_msgSender()).transfer(buyTrigger);
-
-                        address[] memory path = new address[](2);
-
-                        path[0] = WETH;
-                        path[1] = teazetoken;
-
-                        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
-                            0,
-                            path,
-                            address(farmingContract),
-                            block.timestamp
-                        );
-                    }
+                if (simpCardBonusEnabled) {
+                    if (isSimpCardHolder(_msgSender())) {
+                        userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
+                        userReward = userReward.add(userReward.mul(spinResultBonus.add(100)).div(100));
+                    } else {userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);}
 
                 } else {
-
-                    if (address(this).balance > jackpotLimit) {
-                        uint256 netamount = (address(this).balance.mul(winningPercent).div(100)).mul(overage).div(100);
-                        IWETH(WETH).deposit{value : netamount}();
-                        IWETH(WETH).transfer(pair, netamount);
-
-                        payable(_msgSender()).transfer(buyTrigger);
-
-                        address[] memory path = new address[](2);
-
-                        path[0] = WETH;
-                        path[1] = teazetoken;
-
-                        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
-                            0,
-                            path,
-                            address(farmingContract),
-                            block.timestamp
-                        );
-                    }
-
-                    jackpotWinner = true;
-                    payable(_msgSender()).transfer(address(this).balance.mul(winningPercent).div(100));
-
-                    winningNumber = Inserter(inserter).getRandLotto(randNonce, roll);
-
+                    userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
                 }
 
-            return(roll,userReward,jackpotWinner);
+                totalSBX[_msgSender()] = totalSBX[_msgSender()] + userReward;
+                globalSBX = globalSBX.add(userReward);
+                
+                if(staked) {
+                    ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
+                }
+                    
+            }  else {
 
-        } else {
-            if(address(this).balance > jackpotLimit) {
+                if(address(this).balance > jackpotLimit) {
 
                     uint256 netamount = address(this).balance.mul(overage).div(100);
-                    IWETH(WETH).deposit{value : netamount}();
-                    IWETH(WETH).transfer(pair, netamount);
-
-                    payable(_msgSender()).transfer(buyTrigger);
-
-                    address[] memory path = new address[](2);
-
-                    path[0] = WETH;
-                    path[1] = teazetoken;
-
-                    router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
-                        0,
-                        path,
-                        address(farmingContract),
-                        block.timestamp
-                    );
+                    
+                    marketBuy(netamount);
                 }
-            return (roll,0, false);
-        }       
-        
+            }
+
+        } else {
+
+            globalJackpots++;
+
+            jackpotWinner = true;
+
+            totalJackpots[_msgSender()] = totalJackpots[_msgSender()] + 1;
+
+            uint256 netamount = (address(this).balance.mul(winningPercent).div(100));
+            jackpotamt = netamount;
+            totalJackpotsBNB[_msgSender()] = totalJackpotsBNB[_msgSender()] + netamount;
+
+            globalBNBJackpots = globalBNBJackpots + netamount;
+
+            payable(_msgSender()).transfer(netamount);
+
+            winningNumber = Inserter(inserter).getRandLotto(randNonce, roll);
+
+        }
+
+        if (block.timestamp > lastPriceCheck.add(priceCheckInterval)) {
+            saveLatestPrice();
+        }
+
+        emit SpinResult(roll, userReward, jackpotWinner, jackpotamt);
+
     }
 
     function changeBaseReward(uint256 _baseReward) external onlyAuthorized {
         simpWheelBaseReward = _baseReward;
     }
 
-    function changeSpinFee(uint256 _spinFee) external onlyAuthorized {
-        spinFee = _spinFee;
+    function changeFeeReduction(uint256 _feeReduction) external onlyAuthorized {
+        feeReduction = _feeReduction;
+    }
+
+    function changeOverrideFee(uint256 _overrideFee) external onlyAuthorized {
+        overrideFee = _overrideFee;
     }
 
     function changeJackpotLimit(uint256 _limit) external onlyAuthorized {
@@ -299,10 +322,6 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     function changeWinningPercent(uint256 _winningPercent) external onlyAuthorized {
         require(_winningPercent <= 100 && _winningPercent > 0, "Winning percent must be between 1 and 100");
         winningPercent = _winningPercent;
-    }
-
-    function changeBuyTrigger(uint256 _buyTrigger) external onlyAuthorized {
-        buyTrigger = _buyTrigger;
     }
 
     function isSimpCardHolder(address _holder) public view returns (bool) {
@@ -345,14 +364,99 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
 
-    function changeWinningNumber(uint _number) external onlyAuthorized {
-        require(_number >= 900, "Winning number should be greater than or equal to 900");
-        winningNumber = _number;
-    }
-
+    
     function changeOverage(uint _number) external onlyAuthorized {
         require(_number > 0 && _number <= 50, "Jackpot overage should be between 1 and 50 percent of total");
         overage = _number;
+    }
+
+    function marketBuy(uint _netamount) internal {
+
+        globalBNBTeaze = globalBNBTeaze.add(_netamount);
+
+        uint balanceBefore = IERC20(teazetoken).balanceOf(farmingContract);
+
+        IWETH(WETH).deposit{value : _netamount}();
+        IWETH(WETH).transfer(pair, _netamount);
+
+        uint buyTrigger = returnFeeReduction(overrideFee,feeReduction);
+        payable(_msgSender()).transfer(buyTrigger);
+
+        address[] memory path = new address[](2);
+
+        path[0] = WETH;
+        path[1] = teazetoken;
+
+        router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
+            0,
+            path,
+            address(farmingContract),
+            block.timestamp
+        );
+
+        uint balanceNow = IERC20(teazetoken).balanceOf(farmingContract);
+
+        totalTeaze = totalTeaze.add(balanceNow.sub(balanceBefore));
+
+    }
+
+    function setAdminWinnner(bool _status) external onlyOwner {
+        adminWinner = _status;
+    }
+
+    function getWinningNumber() external view returns (uint) {
+        return winningNumber;
+    }
+
+    function changeOracle(address _oracle) external onlyOwner {
+        oracle = IOracle(_oracle);
+    }
+
+    function saveLatestPrice() internal {
+
+         _historyID.increment();
+
+        uint256 _history = _historyID.current();
+        priceHistoryArray.push(_history);
+
+        (,,uint lastPrice) = oracle.getTeazeUSDPrice();
+        
+        priceHistory storage prices = pricehistory[_history];
+        prices.lastPrice = lastPrice;
+        prices.priceTime = block.timestamp;
+
+        lastPriceCheck = block.timestamp;
+    }
+
+    function getPriceHistory(uint period) external view returns (uint256[] memory, uint256[] memory) {
+
+        uint arraylength = priceHistoryArray.length;
+
+        if (arraylength < period) {period = arraylength;}
+
+        uint256[] memory price = new uint256[](period);
+        uint256[] memory time = new uint256[](period);
+        uint256 count = 0;
+
+        for (uint256 x = 1; x <= period; ++x) {
+
+            priceHistory storage prices = pricehistory[arraylength-x];
+            price[count] = prices.lastPrice;
+            time[count] = prices.priceTime;
+            count++;
+
+        }
+
+        return (price, time);
+
+    }
+
+    function getNewWinningNumber() external onlyAuthorized {
+        winningNumber = Inserter(inserter).getRandLotto(randNonce, winningNumber);
+    }
+
+    function returnFeeReduction(uint _amount, uint _reduction) public view returns (uint) {
+        return (oracle.getbnbusdequivalent(_amount).div(_reduction));
     }
 
 
