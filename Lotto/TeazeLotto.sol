@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
-import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -13,6 +12,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 contract Authorized is Ownable {
 
     mapping(address => bool) public authorized;
+
 
     modifier onlyAuthorized() {
         require(authorized[_msgSender()] || owner() == address(_msgSender()));
@@ -108,67 +108,69 @@ interface IWETH {
 
 contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
+    using SafeMath for uint16;
+    using SafeMath for uint8;
     using SafeERC20 for IERC20;
-    using Counters for Counters.Counter;
 
-    struct priceHistory {
-        uint lastPrice;
-        uint priceTime;
+    struct globalLotteryData {
+        uint32 globalSpins;
+        uint32 globalWins;
+        uint32 globalSBX;
+        uint128 globalTeaze;
+        uint128 globalBNBTeaze;
+        uint128 globalJackpots;
+        uint128 globalJackpotsBNB;
     }
 
-    Counters.Counter public _historyID;
+    struct userLotteryData {
+        uint32 lastSpinTime; //Mapping for last user spin on the SimpWheel of Fortune
+        uint32 lastDailySpin; //Mapping for last user daily spin on the SimpWheel of Fortune
+        uint32 totalSBX; //Mapping for total SBX won on the SimpWheel of Fortune
+        uint32 totalSpins; //Mapping for total user spins on the SimpWheel of Fortune
+        uint32 totalWins; //Mapping for total user wins on the SimpWheel of Fortune
+        uint128 totalJackpots; //Mapping for total user jackpots on the SimpWheel of Fortune
+        uint128 totalJackpotsBNB; //Mapping for total user jackpot BNB on the SimpWheel of Fortune
+    }
 
+    mapping(uint256 => globalLotteryData) public globallotto; // Info of each NFT artist/infuencer wallet.
+    mapping(address => userLotteryData) public userlotto; // Info of each NFT artist/infuencer wallet.
+    
     IOracle public oracle;
-    mapping(uint256 => priceHistory) public pricehistory; // Info of each NFT artist/infuencer wallet.
-    uint public lastPriceCheck;
-    uint public priceCheckInterval = 60;
-    uint[] priceHistoryArray;
+    IERC20 simpbux;
+    IDEXRouter router;
+    Inserter private inserter;
 
     address public farmingContract;
     address public simpCardContract;
-    IERC20 simpbux;
-
     address teazetoken = 0xdD2d44c2776f3e1845c20ce32685A3d73BD44522; //teaze token
     address pair;
-
-    IDEXRouter router;
-    
     address WETH;
-    Inserter private inserter;
-    uint256 private randNonce;
 
-    mapping(address => uint256) public lastSpinTime; //Mapping for last user spin on the SimpWheel of Fortune
-    mapping(address => uint256) public lastDailySpin; //Mapping for last user daily spin on the SimpWheel of Fortune
-    mapping(address => uint256) public totalSBX; //Mapping for total SBX won on the SimpWheel of Fortune
-    mapping(address => uint256) public totalSpins; //Mapping for total user spins on the SimpWheel of Fortune
-    mapping(address => uint256) public totalWins; //Mapping for total user wins on the SimpWheel of Fortune
-    mapping(address => uint256) public totalJackpots; //Mapping for total user jackpots on the SimpWheel of Fortune
-    mapping(address => uint256) public totalJackpotsBNB; //Mapping for total user jackpot BNB on the SimpWheel of Fortune
+    uint8 public feeReduction = 4; //amount we want overrideFee reduced for spin & trigger fees
+    uint8 public overrideFee = 1;  //override fee in whole USD  
+    uint8 public winningPercent = 50;
+    uint8 public spinResultBonus = 10;
+    uint8 public overage = 10; 
+    uint16 simpWheelBaseReward = 25;
+    uint16 winningNumber; //remove for production
+    uint16 public spinFrequencyReduction = 3600;
+    uint24 marketBuyGas = 200000;  
+    uint24 public spinFrequency = 600;    //18000 for production
+    uint32 public priceCheckInterval = 900;   //3600 for production
+    uint64 public jackpotLimit = 2 ether;
+    uint128 public blockstart = uint128(block.timestamp);
+    uint256 public LastPriceTime;
+    uint256 private randNonce;
     
-    uint marketBuyGas = 200000;
-    uint simpWheelBaseReward = 25;
-    uint public feeReduction = 4; //amount we want overrideFee reduced for spin & trigger fees
-    uint public overrideFee = 1;  //override fee in whole USD    
-    uint public jackpotLimit = 2 ether;
-    uint public winningPercent = 50;
-    uint public spinFrequency = 86400;
-    uint public spinFrequencyReduction = 14400;
-    uint public spinResultBonus = 10;
-    bool public simpCardBonusEnabled = false;
-    uint public overage = 10;
-    uint public totalTeaze;
-    uint public globalSpins;
-    uint public globalSBX;
-    uint public globalWins;
-    uint public globalJackpots;
-    uint public globalBNBJackpots;
-    uint public globalBNBTeaze;
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
-    uint winningNumber; //remove for production
+    bool public simpCardBonusEnabled = false;
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
+    event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
+    event Jackpot(uint indexed amountBNB, uint indexed winningNumber, address indexed winner);
+    event PriceHistory(uint indexed timestamp, uint indexed price);
 
-    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint _winningNumber) {
+    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _winningNumber) {
        farmingContract = _farmingContract;
        pair = _pair;
        authorized[owner()] = true;
@@ -189,73 +191,82 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function SpinSimpWheel(bool _override) external payable nonReentrant {
 
+        globalLotteryData storage Lotto = globallotto[0];
+        userLotteryData storage User = userlotto[_msgSender()];
+        
         randNonce++;
 
-        globalSpins++;
+        Lotto.globalSpins++;
 
-        totalSpins[_msgSender()] = totalSpins[_msgSender()] + 1;
+        User.totalSpins++;
+        
         
         bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
 
        // require(staked, "User must be staked to spin the SimpWheel of Fortune");
     
         if(!_override) {
-            if(lastSpinTime[_msgSender()] != 0) {
-                require(block.timestamp.sub(lastSpinTime[_msgSender()]) >= spinFrequency, "Not eligible to spin yet");
+            if(User.lastSpinTime != 0) {
+                require(block.timestamp.sub(User.lastSpinTime) >= spinFrequency, "Not eligible to spin yet");
             }
             require(msg.value >= returnFeeReduction(overrideFee,feeReduction).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
             
             if (simpCardBonusEnabled) {
-                if (isSimpCardHolder(_msgSender())) {lastSpinTime[_msgSender()] = block.timestamp.add(spinFrequencyReduction);} else {lastSpinTime[_msgSender()] = block.timestamp;}
+                if (isSimpCardHolder(_msgSender())) {User.lastSpinTime = uint32(block.timestamp.add(uint(spinFrequencyReduction)));} else {User.lastSpinTime = uint32(block.timestamp);}
             } else {
-                lastSpinTime[_msgSender()] = block.timestamp;
+                User.lastSpinTime = uint32(block.timestamp);
             }
 
-            lastDailySpin[_msgSender()] = totalSpins[_msgSender()];
+            User.lastDailySpin = User.totalSpins;
 
         } else {
-            uint overrideSpinFee = (totalSpins[_msgSender()].sub(lastDailySpin[_msgSender()])).mul(overrideFee);
+            uint overrideSpinFee = (uint256(User.totalSpins).sub(User.lastDailySpin)).mul(overrideFee);
             require(msg.value >= (oracle.getbnbusdequivalent(overrideSpinFee)).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
         }
 
-        uint256 roll;
+        uint16 roll;
 
-        roll = Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 1000);
+        roll = uint16(Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 1000));
         
-        roll = roll.add(1); //normalize 1-1000
+        roll += 1; //normalize 1-1000
 
-        uint256 userReward = 0;
+        uint16 userReward;
         bool jackpotWinner = false;
-        uint jackpotamt = 0;
+        uint jackpotamt;
 
         payable(this).transfer(msg.value);
-
-        
 
         if(roll != winningNumber && !adminWinner) {
 
             if (roll > 499) { //winning of some kind
 
-                globalWins++;
+                Lotto.globalWins++;
 
-                totalWins[_msgSender()] = totalWins[_msgSender()] + 1;
+                User.totalWins++;
 
                 if (simpCardBonusEnabled) {
                     if (isSimpCardHolder(_msgSender())) {
-                        userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
-                        userReward = userReward.add(userReward.mul(spinResultBonus.add(100)).div(100));
-                    } else {userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);}
+                        userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));
+                        userReward = uint16(userReward.add(userReward.mul(spinResultBonus.add(100)).div(100)));
+                    } else {userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));}
 
                 } else {
-                    userReward = (simpWheelBaseReward.add(roll.sub(499))).div(2);
+                    userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));
                 }
 
-                totalSBX[_msgSender()] = totalSBX[_msgSender()] + userReward;
-                globalSBX = globalSBX.add(userReward);
+                User.totalSBX += uint32(userReward);
+                Lotto.globalSBX += uint32(userReward);
+
                 
                 if(staked) {
                     ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
                 }
+
+
+                if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
+                    saveLatestPrice();
+                }
+
                     
             }  else {
 
@@ -264,62 +275,72 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                     uint256 netamount = address(this).balance.mul(overage).div(100);
                     
                     marketBuy(netamount);
+
+                } else {
+
+                    if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
+                        saveLatestPrice();
+                    }
                 }
+                
             }
 
         } else {
 
-            globalJackpots++;
+            User.totalWins++;
+
+            Lotto.globalWins++;
+            
+            Lotto.globalJackpots++;
 
             jackpotWinner = true;
 
-            totalJackpots[_msgSender()] = totalJackpots[_msgSender()] + 1;
+            User.totalJackpots++;
 
             uint256 netamount = (address(this).balance.mul(winningPercent).div(100));
             jackpotamt = netamount;
-            totalJackpotsBNB[_msgSender()] = totalJackpotsBNB[_msgSender()] + netamount;
 
-            globalBNBJackpots = globalBNBJackpots + netamount;
+            User.totalJackpotsBNB += uint128(netamount);
+
+            Lotto.globalJackpotsBNB += uint128(netamount);
 
             payable(_msgSender()).transfer(netamount);
 
-            winningNumber = Inserter(inserter).getRandLotto(randNonce, roll);
+            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
 
-        }
+            emit Jackpot(jackpotamt, roll, _msgSender());
 
-        if (block.timestamp > lastPriceCheck.add(priceCheckInterval)) {
-            saveLatestPrice();
         }
 
         emit SpinResult(roll, userReward, jackpotWinner, jackpotamt);
 
     }
 
-    function changeBaseReward(uint256 _baseReward) external onlyAuthorized {
+    function changeBaseReward(uint8 _baseReward) external onlyAuthorized {
         simpWheelBaseReward = _baseReward;
     }
 
-    function changeFeeReduction(uint256 _feeReduction) external onlyAuthorized {
+    function changeFeeReduction(uint8 _feeReduction) external onlyAuthorized {
         feeReduction = _feeReduction;
     }
 
-    function changeOverrideFee(uint256 _overrideFee) external onlyAuthorized {
+    function changeOverrideFee(uint8 _overrideFee) external onlyAuthorized {
         overrideFee = _overrideFee;
     }
 
-    function changeJackpotLimit(uint256 _limit) external onlyAuthorized {
+    function changeJackpotLimit(uint64 _limit) external onlyAuthorized {
         jackpotLimit = _limit;
     }
 
-    function changeMarketBuyGas(uint256 _gas) external onlyAuthorized {
+    function changeMarketBuyGas(uint24 _gas) external onlyAuthorized {
         marketBuyGas = _gas;
     }
 
-    function changeSpinFrequency(uint256 _period) external onlyAuthorized {
+    function changeSpinFrequency(uint24 _period) external onlyAuthorized {
         spinFrequency = _period;
     }
 
-    function changeWinningPercent(uint256 _winningPercent) external onlyAuthorized {
+    function changeWinningPercent(uint8 _winningPercent) external onlyAuthorized {
         require(_winningPercent <= 100 && _winningPercent > 0, "Winning percent must be between 1 and 100");
         winningPercent = _winningPercent;
     }
@@ -338,12 +359,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         simpCardContract = _contract;
     }
 
-    function changeSpinFrequencyRedux(uint _period) external onlyAuthorized {
-        require(_period <= 43200, "Spin Frequency Reduction must not be greater than 12 hours");
+    function changeSpinFrequencyRedux(uint16 _period) external onlyAuthorized {
+        require(_period <= spinFrequency, "Spin Frequency Reduction must not be greater than spin frequency");
         spinFrequencyReduction = _period;
     }
 
-    function changeSpinResultBonus(uint _bonus) external onlyAuthorized {
+    function changeSpinResultBonus(uint8 _bonus) external onlyAuthorized {
         require(_bonus <= 50, "SimpBux bonus cannot be more than 50 percent for SimpCard holders");
         spinResultBonus = _bonus;
     }
@@ -363,16 +384,17 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
-
     
-    function changeOverage(uint _number) external onlyAuthorized {
+    function changeOverage(uint8 _number) external onlyAuthorized {
         require(_number > 0 && _number <= 50, "Jackpot overage should be between 1 and 50 percent of total");
         overage = _number;
     }
 
     function marketBuy(uint _netamount) internal {
 
-        globalBNBTeaze = globalBNBTeaze.add(_netamount);
+        globalLotteryData storage Lotto = globallotto[0];
+
+        Lotto.globalBNBTeaze += uint128(_netamount);
 
         uint balanceBefore = IERC20(teazetoken).balanceOf(farmingContract);
 
@@ -396,7 +418,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         uint balanceNow = IERC20(teazetoken).balanceOf(farmingContract);
 
-        totalTeaze = totalTeaze.add(balanceNow.sub(balanceBefore));
+        Lotto.globalTeaze += uint128(balanceNow.sub(balanceBefore));
+
+        emit TeazeBuy(_netamount, balanceNow.sub(balanceBefore));
 
     }
 
@@ -414,49 +438,24 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function saveLatestPrice() internal {
 
-         _historyID.increment();
-
-        uint256 _history = _historyID.current();
-        priceHistoryArray.push(_history);
+        LastPriceTime = block.timestamp;
 
         (,,uint lastPrice) = oracle.getTeazeUSDPrice();
         
-        priceHistory storage prices = pricehistory[_history];
-        prices.lastPrice = lastPrice;
-        prices.priceTime = block.timestamp;
-
-        lastPriceCheck = block.timestamp;
-    }
-
-    function getPriceHistory(uint period) external view returns (uint256[] memory, uint256[] memory) {
-
-        uint arraylength = priceHistoryArray.length;
-
-        if (arraylength < period) {period = arraylength;}
-
-        uint256[] memory price = new uint256[](period);
-        uint256[] memory time = new uint256[](period);
-        uint256 count = 0;
-
-        for (uint256 x = 1; x <= period; ++x) {
-
-            priceHistory storage prices = pricehistory[arraylength-x];
-            price[count] = prices.lastPrice;
-            time[count] = prices.priceTime;
-            count++;
-
-        }
-
-        return (price, time);
-
+        emit PriceHistory(LastPriceTime, lastPrice);
     }
 
     function getNewWinningNumber() external onlyAuthorized {
-        winningNumber = Inserter(inserter).getRandLotto(randNonce, winningNumber);
+        winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, winningNumber));
     }
 
     function returnFeeReduction(uint _amount, uint _reduction) public view returns (uint) {
         return (oracle.getbnbusdequivalent(_amount).div(_reduction));
+    }
+
+    function changePriceCheckInterval(uint32 _priceCheckInterval) external onlyAuthorized {
+        require(priceCheckInterval > 0 , "Price check interval must be greater than 0");
+        priceCheckInterval = _priceCheckInterval;
     }
 
 
