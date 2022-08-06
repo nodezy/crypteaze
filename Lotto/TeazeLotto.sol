@@ -123,17 +123,17 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     }
 
     struct userLotteryData {
-        uint32 lastSpinTime; //Mapping for last user spin on the SimpWheel of Fortune
-        uint32 lastDailySpin; //Mapping for last user daily spin on the SimpWheel of Fortune
-        uint32 totalSBX; //Mapping for total SBX won on the SimpWheel of Fortune
-        uint32 totalSpins; //Mapping for total user spins on the SimpWheel of Fortune
-        uint32 totalWins; //Mapping for total user wins on the SimpWheel of Fortune
-        uint128 totalJackpots; //Mapping for total user jackpots on the SimpWheel of Fortune
-        uint128 totalJackpotsBNB; //Mapping for total user jackpot BNB on the SimpWheel of Fortune
+        uint32 lastSpinTime; 
+        uint32 lastDailySpin; 
+        uint32 totalSBX; 
+        uint32 totalSpins; 
+        uint32 totalWins; 
+        uint128 totalJackpots; 
+        uint128 totalJackpotsBNB; 
     }
 
-    mapping(uint256 => globalLotteryData) public globallotto; // Info of each NFT artist/infuencer wallet.
-    mapping(address => userLotteryData) public userlotto; // Info of each NFT artist/infuencer wallet.
+    mapping(uint256 => globalLotteryData) public globallotto; 
+    mapping(address => userLotteryData) public userlotto; 
     
     IOracle public oracle;
     IERC20 simpbux;
@@ -152,11 +152,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint8 public spinResultBonus = 10;
     uint8 public overage = 10; 
     uint16 simpWheelBaseReward = 25;
-    uint16 winningNumber; //remove for production
+    uint16 winningNumber; 
+    uint16 public winningRoll = 499; //adjustable roll # so SBX win % can be 50/50 
     uint16 public spinFrequencyReduction = 3600;
     uint24 marketBuyGas = 200000;  
-    uint24 public spinFrequency = 600;    //18000 for production
-    uint32 public priceCheckInterval = 900;   //3600 for production
+    uint24 public spinFrequency = 18000;    //18000 for production
+    uint32 public priceCheckInterval = 900;   //900 for production
     uint64 public jackpotLimit = 2 ether;
     uint128 public blockstart = uint128(block.timestamp);
     uint256 public LastPriceTime;
@@ -167,7 +168,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
-    event Jackpot(uint indexed amountBNB, uint indexed winningNumber, address indexed winner);
+    event Jackpot(uint indexed amountBNB, uint indexed winningRoll, address indexed winner);
     event PriceHistory(uint indexed timestamp, uint indexed price);
 
     constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _winningNumber) {
@@ -199,8 +200,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         Lotto.globalSpins++;
 
         User.totalSpins++;
-        
-        
+                
         bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
 
        // require(staked, "User must be staked to spin the SimpWheel of Fortune");
@@ -236,9 +236,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         payable(this).transfer(msg.value);
 
-        if(roll != winningNumber && !adminWinner) {
+        if(roll != winningRoll && !adminWinner) {
 
-            if (roll > 499) { //winning of some kind
+            if (roll > winningRoll) { //winning of some kind
 
                 Lotto.globalWins++;
 
@@ -246,12 +246,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
                 if (simpCardBonusEnabled) {
                     if (isSimpCardHolder(_msgSender())) {
-                        userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));
+                        userReward = uint16(simpWheelBaseReward.add(roll.sub(winningRoll)).div(2));
                         userReward = uint16(userReward.add(userReward.mul(spinResultBonus.add(100)).div(100)));
-                    } else {userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));}
+                    } else {userReward = uint16(simpWheelBaseReward.add(roll.sub(winningRoll)).div(2));}
 
                 } else {
-                    userReward = uint16(simpWheelBaseReward.add(roll.sub(499)).div(2));
+                    userReward = uint16(simpWheelBaseReward.add(roll.sub(winningRoll)).div(2));
                 }
 
                 User.totalSBX += uint32(userReward);
@@ -306,7 +306,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
             payable(_msgSender()).transfer(netamount);
 
-            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
+            winningRoll = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
 
             emit Jackpot(jackpotamt, roll, _msgSender());
 
@@ -428,7 +428,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         adminWinner = _status;
     }
 
-    function getWinningNumber() external view returns (uint) {
+    function getWinningNumber() external view returns (uint) { //remove for production
         return winningNumber;
     }
 
@@ -458,5 +458,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         priceCheckInterval = _priceCheckInterval;
     }
 
+    function changeWinningRoll(uint16 _number) external onlyAuthorized {
+        winningRoll = _number;
+    }
 
 }
