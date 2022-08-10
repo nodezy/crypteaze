@@ -118,20 +118,28 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     function checkIfLootbox() public {
 
-        uint256 nftids = teazepacks.getCurrentNFTID();
+        uint256 _nftids = teazepacks.getCurrentNFTID();
         
-        //if (heldAmount.add(maxRewardAmount) <= address(this).balance && nftids > 0) {
+        //if (heldAmount.add(maxRewardAmount) <= address(this).balance && nftids >=3) {
         if (true) {
 
             //get 'lootboxable' NFT
             
-            uint256 count;            
-            uint256[] memory lootableNFT;
+            uint256 count; 
+            uint256 countmore;           
 
-            for (uint x=1;x<=nftids;x++) {
+            for (uint x=1;x<=_nftids;x++) { //first time get all NFT that are live and lootable
                 if (teazepacks.getLootboxAble(x) && teazepacks.getPackTimelimitCrates(x)) {
-                    lootableNFT[count]=x;
                     count++;
+                }
+            }
+
+            uint256[] memory lootableNFT = new uint256[](count); //Now create the correct sized memory array
+
+            for (uint x=1;x<=_nftids;x++) { //Now populate array with the correct NFT so its packed correctly (no zeros)
+                if (teazepacks.getLootboxAble(x) && teazepacks.getPackTimelimitCrates(x)) {
+                    lootableNFT[countmore]=x;
+                    countmore++;
                 }
             }
 
