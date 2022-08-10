@@ -33,7 +33,7 @@ interface ITeazeNFT {
    // function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256); 
 }
 
-contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
+contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -67,7 +67,7 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     address public nftContract; 
     address public packsContract; // Address of the associated farming contract.
     
-    uint256 private heldAmount = 0; //Variable to determine how much BNB is in the contract not allocated to a lootbox
+    uint256 public heldAmount; //Variable to determine how much BNB is in the contract not allocated to a lootbox
     uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
     uint256 public rewardPerClass = 33333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint256 public nftPerLootbox = 3;
@@ -88,7 +88,7 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         inserter = Inserter(_inserter);
         randNonce = inserter.getNonce();
         inserter.makeActive();
-        addWhitelisted(owner());
+        addAuthorized(owner());
     }
 
     receive() external payable {}
@@ -117,15 +117,16 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
 
     function checkIfLootbox() public {
+
+        uint256 nftids = teazepacks.getCurrentNFTID();
         
         //if (heldAmount.add(maxRewardAmount) <= address(this).balance && nftids > 0) {
         if (true) {
 
             //get 'lootboxable' NFT
             
-            uint256 count = 0;
-            uint256 nftids = teazepacks.getCurrentNFTID();
-            uint256[] memory lootableNFT = new uint256[](nftids);
+            uint256 count;            
+            uint256[] memory lootableNFT;
 
             for (uint x=1;x<=nftids;x++) {
                 if (teazepacks.getLootboxAble(x) && teazepacks.getPackTimelimitCrates(x)) {
@@ -136,7 +137,7 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
             uint lootableNFTcount = lootableNFT.length;
 
-            if (lootableNFT.length >= 3) {
+            if (lootableNFTcount >= 3) {
 
                 //create lootbox
 
@@ -146,10 +147,10 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
                 uint256 lootboxid = _LootBoxIds.current();
 
-                uint256 mintclassTotals = 0;
-                uint256 percentTotals = 0;
+                uint256 mintclassTotals;
+                uint256 percentTotals;
                 
-                uint256 nftroll = 0;
+                uint256 nftroll;
                 
                 
                 for (uint256 x = 1; x <= nftPerLootbox; ++x) {
@@ -367,6 +368,10 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return array;
 
     }
+
+    function getActiveSimpCratesLength() external view returns (uint256) {
+        return activelootboxarray.length;
+    }
     
     function getInactiveSimpCratesLength() external view returns (uint256) {
         return inactivelootboxarray.length;
@@ -382,19 +387,21 @@ contract SimpCrates is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return lootboxinfo.rollNumber;
     }
 
-    function retireLootbox(uint256 _lootboxid) internal {
+    function retireLootbox(uint256 _lootboxid) public { //change to internal for production
         uint arraylength = activelootboxarray.length;
 
         //Remove lootboxid from active array
-        for(uint x = 0; x < arraylength; x++) {
+        for(uint x = 1; x <= arraylength; x++) {
             if (activelootboxarray[x] == _lootboxid) {
                 activelootboxarray[x] = activelootboxarray[arraylength-1];
                 activelootboxarray.pop();
+
+                //Add lootboxid to inactive array
+                inactivelootboxarray.push(_lootboxid);
+
+                unclaimedBoxes.decrement();
             }
         }       
-
-        //Add lootboxid to inactive array
-        inactivelootboxarray.push(_lootboxid);
 
     }
 
