@@ -696,5 +696,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     }
 
+    function setPackTimeLimit(uint256 _packid, uint256 _timeend) external onlyAuthorized {
+        require(_timeend > block.timestamp, "E31");
+        PackInfo storage packinfo = packInfo[_packid];
+        packinfo.timeend = _timeend;
+    }
+
+    function changeTimeEnding(uint256 _timeending) external onlyAuthorized {
+        require(_timeending >= 86400, "E32");
+        timeEnding = _timeending;
+    }
+
 }
 
