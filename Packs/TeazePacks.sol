@@ -10,10 +10,18 @@ import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./auth.sol";
 
+interface ITeazeFarm {
+    function getUserStaked(address _holder) external view returns (bool);
+    function increaseSBXBalance(address _address, uint256 _amount) external;
+}
+
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
     function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256); 
+    function ownerOf(uint256 tokenId) external view returns (address owner);
+    function getApproved(uint256 tokenId) external view returns (address);
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
 }
 
 interface Inserter {
@@ -67,9 +75,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping (uint => bool) private packs; //Whether the packID exists or not.
     mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
     mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
-    
-    uint256[] public activelootboxarray; //Array to store each active lootbox id so we can view.
-    uint256[] private inactivelootboxarray; //Array to store each active lootbox id so we can view.
+
     mapping(uint => uint256[]) public PackNFTids; // array of NFT ID's listed under each pack.
     
     mapping (uint256 => bool) public claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
@@ -82,9 +88,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     ISimpCrates public simpcrates;
     address public nftContract; // Address of the associated farming contract.
     address public farmingContract; // Address of the associated farming contract.
+    address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
     uint256 timeEnding = 2592000; //default pack lifetime of 30 days.
+    uint256 nftburnratio = 100;
+    uint256 nftburnmultiple = 5;
     
     constructor(address _nftContract, address _farmingContract, address _inserter) {
         nftContract = _nftContract;
@@ -705,6 +714,28 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function changeTimeEnding(uint256 _timeending) external onlyAuthorized {
         require(_timeending >= 86400, "E32");
         timeEnding = _timeending;
+    }
+
+    function setNFTburnAmts(uint _ratio, uint _multiple) external onlyAuthorized {
+        nftburnratio = _ratio;
+        nftburnmultiple = _multiple;
+    }
+
+    function getNFTSBXburnAmount(uint _tokenID) public view returns (uint) {
+        uint percent = getNFTPercent(getIDbyURI(ITeazeNFT(nftContract).tokenURI(_tokenID)));
+
+        uint SBXamount = (nftburnratio.sub(percent)).mul(nftburnratio);
+
+        return SBXamount.mul(1000000000); //add 9 zeros
+    }
+
+    function burnNFTforSBX(uint _tokenID) external {
+        
+        require(IERC721(nftContract).ownerOf(_tokenID) == address(_msgSender()), "E34");
+        require(ITeazeFarm(farmingContract).getUserStaked(_msgSender()), "E35");
+       
+        ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(_tokenID)); 
+        IERC721(nftContract).safeTransferFrom(_msgSender(), DEAD, _tokenID);
     }
 
 }
