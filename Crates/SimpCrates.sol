@@ -398,8 +398,10 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     function retireLootbox(uint256 _lootboxid) public { //change to internal for production
         uint arraylength = activelootboxarray.length;
 
+        require(_lootboxid <= arraylength, "E33");
+
         //Remove lootboxid from active array
-        for(uint x = 1; x <= arraylength; x++) {
+        for(uint x = 0; x < arraylength; x++) {
             if (activelootboxarray[x] == _lootboxid) {
                 activelootboxarray[x] = activelootboxarray[arraylength-1];
                 activelootboxarray.pop();
@@ -407,7 +409,11 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                 //Add lootboxid to inactive array
                 inactivelootboxarray.push(_lootboxid);
 
+                claimedBoxes.increment();
+
                 unclaimedBoxes.decrement();
+
+                return;
             }
         }       
 
