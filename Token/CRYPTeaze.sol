@@ -149,7 +149,7 @@ contract DividendDistributor is IDividendDistributor {
 
     uint256 public impoundTimelimit = 2592000; //1 month default
     uint256 public minDistribution = 1000000* (10 ** 9); //0.001
-    uint256 public minHoldAmountForRewards = 25000000 * (10**9); // Must hold 2.5 trillion tokens to receive rewards
+    uint256 public minHoldAmountForRewards = 25000000 * (10**9); // Must hold 25 million tokens to receive rewards
 
     uint256 currentIndex;
 
@@ -579,22 +579,23 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     uint256 initialBlockLimit = 1;
 
     uint256 public totalFee = 50; //(5%)
-    uint256 public buybackFee = 100;
-    uint256 public stakepoolFee = 100;
+    uint256 public lotteryFee = 100;
     uint256 public nftmarketingFee = 100;
+    uint256 public lootboxFee = 100;
+    
     uint256 public feeDenominator = 1000;
     uint256 discountOffset = 1;
     uint256 public partnerFeeLimiter = 50;
     uint256 public WETHaddedToPool;
 
-    address public buybackWallet;
+    address public lotteryAddress;
     address public nftMarketingWallet;
-    address public stakeFundWallet;
+    address public lootBoxAddress;
 
-    uint256 public totalBuyBack;
     uint256 public totalReflect;
+    uint256 public totalLottery;
     uint256 public totalNFTmarketing;
-    uint256 public totalStakepool;
+    uint256 public totalLootBox;
 
     IDEXRouter public router;
     IOracle public oracle;
@@ -604,13 +605,13 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     uint256 public launchedAt;
 
     bool public swapEnabled = false;
-    bool public stakeWalletActive = true;
+    bool public lootContractActive = true;
     bool public nftWalletActive = true;
-    bool public buybackWalletActive = true;
+    bool public lotteryContractActive = true;
     bool public distributorDeposit = true;
     bool public teamWalletDeposit = true;
     bool public enablePartners = false;
-    bool public enableOracle = true;
+    bool public enableOracle = false;
     bool public airdropEnabled = false;
     bool public launchEnabled = false;
 
@@ -651,13 +652,13 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         isDividendExempt[address(this)] = true;
         isDividendExempt[DEAD] = true;
 
-        buybackWallet = 0x697F1cEF29E55d547313e814EC804B45e5ce0a2E;
-        nftMarketingWallet = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4;
-        stakeFundWallet = 0x1fCFa721c1AcA1c97AE8C4254E71b579C1dD3139;
+        lotteryAddress = 0x697F1cEF29E55d547313e814EC804B45e5ce0a2E;
+        nftMarketingWallet = 0x5f80944EFB28Fee140BE74e57E22235D79ffda19;
+        lootBoxAddress = 0x02A03672407f257dD220e47c82190a54D68cbA7f;
 
-        isFeeExempt[buybackWallet] = true;
+        isFeeExempt[lotteryAddress] = true;
         isFeeExempt[nftMarketingWallet] = true;
-        isFeeExempt[stakeFundWallet] = true;
+        isFeeExempt[lootBoxAddress] = true;
 
         _balances[_presaler] = _totalSupply;
         emit Transfer(address(0), _presaler, _totalSupply);
@@ -848,19 +849,19 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         //Deposit to the team wallets
         if (teamWalletDeposit) {
 
-        uint256 amountBNBstake = 0;
-        uint256 amountBNBbuyback = 0;
+        uint256 amountBNBlotto = 0;
         uint256 amountBNBnft = 0;
+        uint256 amountBNBloot = 0;
 
         uint256 amountTotatBNBFee;
 
-            if (buybackWalletActive) {
-                amountBNBbuyback = amountBNB.mul(buybackFee).div(feeDenominator);
+            if (lotteryContractActive) {
+                amountBNBlotto = amountBNB.mul(lotteryFee).div(feeDenominator);
 
-                (bool successTeam1, /* bytes memory data */) = payable(buybackWallet).call{value: amountBNBbuyback, gas: walletGas}("");
-                require(successTeam1, "Buyback wallet rejected BNB transfer");
+                (bool successTeam1, /* bytes memory data */) = payable(lotteryAddress).call{value: amountBNBlotto, gas: walletGas}("");
+                require(successTeam1, "Lottery contract rejected BNB transfer");
 
-                totalBuyBack = totalBuyBack.add(amountBNBbuyback);
+                totalLottery = totalLottery.add(amountBNBlotto);
             }
                         
             if (nftWalletActive) {
@@ -872,16 +873,16 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
                 totalNFTmarketing = totalNFTmarketing.add(amountBNBnft);
             } 
 
-            if (stakeWalletActive) {
-                amountBNBstake = amountBNB.mul(stakepoolFee).div(feeDenominator);
+            if (lootContractActive) {
+                amountBNBloot = amountBNB.mul(lootboxFee).div(feeDenominator);
 
-                (bool successTeam4, /* bytes memory data */) = payable(stakeFundWallet).call{value: amountBNBstake, gas: walletGas}("");
+                (bool successTeam4, /* bytes memory data */) = payable(lootBoxAddress).call{value: amountBNBloot, gas: walletGas}("");
                 require(successTeam4, "Staking pool wallet rejected BNB transfer");
 
-                totalStakepool = totalStakepool.add(amountBNBstake);
+                totalLootBox = totalLootBox.add(amountBNBloot);
             } 
             
-            amountTotatBNBFee = amountTotatBNBFee.add(amountBNBstake).add(amountBNBbuyback).add(amountBNBnft);
+            amountTotatBNBFee = amountTotatBNBFee.add(amountBNBloot).add(amountBNBlotto).add(amountBNBnft);
             amountBNBReflection = amountBNB.sub(amountTotatBNBFee); 
             totalReflect = totalReflect.add(amountBNBReflection);
         
@@ -960,25 +961,25 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         
     }
 
-    function setTaxes (uint256 _buybackFee, uint256 _nftmarketingFee, uint256 _stakepoolFee) external onlyOwner {
+    function setTaxes (uint256 _lotteryFee, uint256 _nftmarketingFee, uint256 _lootboxFee) external onlyOwner {
 
-        require(totalFee >= _buybackFee.add(_nftmarketingFee).add(_stakepoolFee), "Total taxes must not exceen total fee");
+        require(totalFee >= _lotteryFee.add(_nftmarketingFee).add(_lootboxFee), "Total taxes must not exceen total fee");
 
-        buybackFee = _buybackFee;
+        lotteryFee = _lotteryFee;
         nftmarketingFee = _nftmarketingFee;
-        stakepoolFee = _stakepoolFee;
+        lootboxFee = _lootboxFee;
     }
     
-    function setFeeReceivers(address _buybackWallet, address _nftMarketingWallet, address _stakeFundWallet) external onlyOwner {
-        require(_buybackWallet != ZERO, "Charity wallet must not be zero address");
+    function setFeeReceivers(address _lotteryAddress, address _nftMarketingWallet, address _lootBoxAddress) external onlyOwner {
+        require(_lotteryAddress != ZERO, "Charity wallet must not be zero address");
         require(_nftMarketingWallet != ZERO, "NFT reward wallet must not be zero address");
-        require(_stakeFundWallet != ZERO, "Stakepool wallet must not be zero address");
-         require(_buybackWallet != DEAD, "Charity wallet must not be dead address");
+        require(_lootBoxAddress != ZERO, "Stakepool wallet must not be zero address");
+         require(_lotteryAddress != DEAD, "Charity wallet must not be dead address");
         require(_nftMarketingWallet != DEAD, "NFT reward wallet must not be dead address");
-        require(_stakeFundWallet != DEAD, "Stakepool wallet must not be dead address");
-        buybackWallet = _buybackWallet;
+        require(_lootBoxAddress != DEAD, "Stakepool wallet must not be dead address");
+        lotteryAddress = _lotteryAddress;
         nftMarketingWallet = _nftMarketingWallet;
-        stakeFundWallet = _stakeFundWallet;
+        lootBoxAddress = _lootBoxAddress;
 
     }
     
@@ -1001,7 +1002,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
 
     function viewTeamWalletInfo() public view returns (uint256 reflectDivs, uint256 buybackDivs, uint256 nftDivs, uint256 stakeDivs) {
-        return (totalReflect, totalBuyBack, totalNFTmarketing, totalStakepool);
+        return (totalReflect, totalLottery, totalNFTmarketing, totalLootBox);
     }
 
     // This will allow owner to rescue BNB sent by mistake directly to the contract
@@ -1108,7 +1109,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     }
 
     function setStakePoolActive(bool _status) external onlyOwner {
-        stakeWalletActive = _status; 
+        lootContractActive = _status; 
     }
 
     function setNFTPoolActive(bool _status) external onlyOwner {
