@@ -311,7 +311,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     // View function to see pending SimpBux tokens on frontend.
-    function pendingRewards(uint256 _pid, address _user) public view returns (uint256) {
+    function pendingSBXRewards(uint256 _pid, address _user) public view returns (uint256) {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accTeazePerShare = pool.accTeazePerShare;
@@ -371,7 +371,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         if (_amount > 0) {
 
             if(user.amount > 0) { //if user has already deposited, secure rewards before reconfiguring rewardDebt
-                uint256 tempRewards = pendingRewards(_pid, _msgSender());
+                uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                 userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
             }
             
@@ -462,7 +462,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
                 if (totalRewards == 0) { //no rewards, just return 100% to the user
 
-                    uint256 tempRewards = pendingRewards(_pid, _msgSender());
+                    uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                     userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
 
                     pool.runningTotal = pool.runningTotal.sub(_amount);
@@ -473,7 +473,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 } 
                 if (totalRewards > 0) { //include reflection
 
-                    uint256 tempRewards = pendingRewards(_pid, _msgSender());
+                    uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                     userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
 
                     uint256 percentRewards = _amount.mul(100).div(pool.runningTotal); //get % of share out of 100
@@ -489,7 +489,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             } else {
 
 
-                uint256 tempRewards = pendingRewards(_pid, _msgSender());
+                uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                 
                 userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
                 user.amount = user.amount.sub(_amount);
@@ -569,28 +569,28 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     //gets the total of all pending rewards from each pool
-    function getTotalPendingRewards(address _user) public view returns (uint256) { 
-        uint256 value1 = pendingRewards(0, _user);
-        uint256 value2 = pendingRewards(1, _user);
+    function getTotalpendingSBXRewards(address _user) public view returns (uint256) { 
+        uint256 value1 = pendingSBXRewards(0, _user);
+        uint256 value2 = pendingSBXRewards(1, _user);
 
         return value1.add(value2);
     }
 
     //gets the total amount of rewards secured (not pending)
-    function getAccruedRewards(address _user) external view returns (uint256) { 
+    function getAccruedSBXRewards(address _user) external view returns (uint256) { 
         return userBalance[_user];
     }
 
     //gets the total of pending + secured rewards
-    function getTotalRewards(address _user) external view returns (uint256) { 
-        uint256 value1 = getTotalPendingRewards(_user);
+    function getTotalSBXRewards(address _user) external view returns (uint256) { 
+        uint256 value1 = getTotalpendingSBXRewards(_user);
         uint256 value2 = userBalance[_user];
 
         return value1.add(value2);
     }
 
     //moves all pending rewards into the accrued array
-    function redeemTotalRewards(address _user) internal { 
+    function redeemTotalSBXRewards(address _user) internal { 
 
         uint256 pool0 = 0;
 
@@ -599,7 +599,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         updatePool(pool0);
         
-        uint256 value0 = pendingRewards(pool0, _user);
+        uint256 value0 = pendingSBXRewards(pool0, _user);
         
         userBalance[_user] = userBalance[_user].add(value0);
 
@@ -612,7 +612,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         updatePool(pool1);
 
-        uint256 value1 = pendingRewards(pool1, _user);
+        uint256 value1 = pendingSBXRewards(pool1, _user);
         
         userBalance[_user] = userBalance[_user].add(value1);
 
@@ -636,7 +636,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
 
-        redeemTotalRewards(_msgSender());
+        redeemTotalSBXRewards(_msgSender());
 
         uint256 pending = userBalance[_msgSender()];
         if (pending > 0) {
@@ -690,7 +690,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         require(price > 0, "NFT not found");
 
-        redeemTotalRewards(_msgSender());
+        redeemTotalSBXRewards(_msgSender());
 
         if (userBalance[_msgSender()] < price) {
             
@@ -768,13 +768,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function increaseSBXBalance(address _address, uint256 _amount) external {
-        require(msg.sender == address(teazelotto), "Function may only be called by the lotto contract");
+        require(msg.sender == address(teazelotto) || msg.sender == address(packsContract), "Function may only be called by the approved contract");
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
 
     // Get the holder rewards of users staked $teaze if they were to withdraw
-    function getHolderRewards(address _address) external view returns (uint256) {
+    function getTeazeHolderRewards(address _address) external view returns (uint256) {
         PoolInfo storage pool = poolInfo[1];
         UserInfo storage user = userInfo[1][_address];
 
@@ -830,7 +830,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         if (userAmount == 0) {
             return;
         } else {
-            redeemTotalRewards(_msgSender());
+            redeemTotalSBXRewards(_msgSender());
         }       
     }
 
