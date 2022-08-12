@@ -26,54 +26,6 @@ interface ITeazePacks {
   function getPackTimelimitFarm(uint256 _nftid) external view returns (bool);
 }
 
-interface IDEXRouter {
-    function factory() external pure returns (address);
-    function WETH() external pure returns (address);
-
-    function addLiquidity(
-        address tokenA,
-        address tokenB,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external returns (uint amountA, uint amountB, uint liquidity);
-
-    function addLiquidityETH(
-        address token,
-        uint amountTokenDesired,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
-
-    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external;
-
-    function swapExactETHForTokensSupportingFeeOnTransferTokens(
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external payable;
-
-    function swapExactTokensForETHSupportingFeeOnTransferTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external;
-}
-
 // Allows another user(s) to change contract variables
 contract Authorized is Ownable {
 
@@ -165,8 +117,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     mapping(uint256 => mapping(address => uint256)) public unstakeTimer; // Used to track time since unstake requested.
     mapping(address => uint256) private userBalance; // Balance of SimpBux for each user that survives staking/unstaking/redeeming.
     mapping(address => bool) private promoWallet; // Whether the wallet has received promotional SimpBux.
+    mapping(address => bool) private mintToken; // Whether the wallet has received a mint token from the lottery.
     uint256 public totalEarnedLoot; //Total amount of BNB sent for lootbox creation.
-    uint256 public totalEarnedPool; //Total amount of BNB used to buy token before being sent to stakepool.
+    uint256 public totalEarnedLotto; //Total amount of BNB used to buy token before being sent to stakepool.
     uint256 public totalEarnedNFT; // Total amount of BNB NFT creation wallet to fund new NFTs.
     mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not.
     
@@ -179,14 +132,10 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     bool simpCardBonusEnabled = false;
     uint simpCardRedeemDiscount = 10;
     
-    address teazelotto; //teaze lotto address
-
-    address teazetoken; //teaze token
+    address public teazelotto; //teaze lotto address
+    address public nftContract;
+    address public teazetoken; //teaze token
     IERC20 iteazetoken; 
-
-    IDEXRouter public router;
-    
-    address WETH;
 
     uint256 marketBuyGas = 450000;
 
@@ -198,8 +147,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     constructor(
         SimpBux _simpbux,
         uint256 _startBlock,
-        address _teazetoken,
-        address _router
+        address _teazetoken
     ) {
         require(address(_simpbux) != address(0), "SimpBux address is invalid");
         //require(_startBlock >= block.number, "startBlock is before current block");
@@ -212,10 +160,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         addAuthorized(owner());
 
-        router = _router != address(0)
-            ? IDEXRouter(_router)
-            : IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); //0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0 pcs test router
-        WETH = router.WETH();
     }
 
     receive() external payable {}
@@ -441,7 +385,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
-
     // Withdraw LP tokens from TeazeFarming
     function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
 
@@ -649,11 +592,16 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     // Set teazelotto contract address
+     function setNFTContract(address _address) external onlyAuthorized {
+        nftContract = _address;
+    }
+
+    // Set teazelotto contract address
      function setLottoContract(address _address) external onlyAuthorized {
         teazelotto = _address;
     }
 
-    // Set NFT contract address
+    // Set packs contract address
      function setPacksContract(address _address) external onlyAuthorized {
         packsContract = _address;
     }
@@ -728,23 +676,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
         uint256 netremainder = msg.value.sub(netamount);
-        totalEarnedPool = totalEarnedPool + netamount;
-    
-        address[] memory path = new address[](2);
-
-            path[0] = WETH;
-            path[1] = teazetoken;
-
-            router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:netamount, gas:marketBuyGas}(
-                0,
-                path,
-                address(this),
-                block.timestamp
-            );
-
+            
         ITeazePacks(packsContract).premint(_msgSender(), _packid);
         ITeazePacks(packsContract).packPurchased(_msgSender(),_packid);
 
+        payable(teazelotto).transfer(netamount);
+        totalEarnedLotto = totalEarnedLotto + netamount;
+        
         payable(NFTmarketing).transfer(netremainder.mul(nftMarketingSplit).div(100));
         totalEarnedNFT = totalEarnedNFT + netremainder.mul(nftMarketingSplit).div(100);
 
@@ -997,6 +935,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         } else {
            return packSimpBuxPrice;
         }
+    }
+
+    function setMintToken(bool _status, address _holder) external {
+        require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
+        mintToken[_holder] = _status;
+    }
+
+    function hasMintToken(address _holder) public view returns (bool) {
+        return mintToken[_holder];
     }
     
 }
