@@ -15,7 +15,7 @@ contract Authorized is Ownable {
 
 
     modifier onlyAuthorized() {
-        require(authorized[_msgSender()] || owner() == address(_msgSender()));
+        require(authorized[_msgSender()] || owner() == address(_msgSender()), "Caller is not owner or authorized");
         _;
     }
 
@@ -41,6 +41,7 @@ interface IOracle {
 interface ITeazeFarm {
     function getUserStaked(address _holder) external view returns (bool);
     function increaseSBXBalance(address _address, uint256 _amount) external;
+    function mintToken(bool _status) external;
 }
 
 interface Inserter {
@@ -98,6 +99,11 @@ interface IDEXRouter {
     ) external;
 }
 
+interface LastLotto {
+    function userlotto(address _holder) external view returns (uint32,uint32,uint32,uint32,uint32,uint128,uint128);
+    function globallotto(uint _struct) external view returns (uint32,uint32,uint32,uint128,uint128,uint128,uint128);
+}
+
 interface IWETH {
     function deposit() external payable;
     function transfer(address to, uint value) external returns (bool);
@@ -142,7 +148,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     address public farmingContract;
     address public simpCardContract;
-    address teazetoken = 0xdD2d44c2776f3e1845c20ce32685A3d73BD44522; //teaze token
+    address teazetoken = 0xB34cd7Cc532f108238d1EeC1de8Ce0aeD7dDE5Eb; //teaze token
+    address lastLottery = 0xac80B11D63222e1466C06664932158a8e3b998bC;
     address pair;
     address WETH;
 
@@ -151,27 +158,32 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint8 public winningPercent = 50;
     uint8 public spinResultBonus = 10;
     uint8 public overage = 10; 
+    uint8 public gasrefund = 3; 
     uint16 simpWheelBaseReward = 25;
     uint16 winningNumber; 
     uint16 public winningRoll = 499; //adjustable roll # so SBX win % can be 50/50 
     uint16 public spinFrequencyReduction = 3600;
-    uint24 marketBuyGas = 200000;  
+    uint16 public mintbonuspercent = 975;
+    uint24 marketBuyGas = 230000;  
     uint24 public spinFrequency = 18000;    //18000 for production
     uint32 public priceCheckInterval = 900;   //900 for production
-    uint64 public jackpotLimit = 2 ether;
+    uint128 public jackpotLimit = 2 ether;
+    uint128 public jackpotLimitDefault = 2 ether;
     uint128 public blockstart = uint128(block.timestamp);
     uint256 public LastPriceTime;
+    uint256 private seed;
     uint256 private randNonce;
     
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
     bool public simpCardBonusEnabled = false;
+    bool public nftbonusenabled = false;
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
     event Jackpot(uint indexed amountBNB, uint indexed winningRoll, address indexed winner);
     event PriceHistory(uint indexed timestamp, uint indexed price);
 
-    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _winningNumber) {
+    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _seed) {
        farmingContract = _farmingContract;
        pair = _pair;
        authorized[owner()] = true;
@@ -179,12 +191,15 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
        randNonce = inserter.getNonce();
        inserter.makeActive();
        oracle = IOracle(_oracle);
-       winningNumber = _winningNumber;
-
+       seed = _seed;
+       
        router = _router != address(0)
             ? IDEXRouter(_router)
             : IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); //0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0 pcs test router
         WETH = router.WETH();
+
+        updateGlobalLotteryNumbers();
+        updateGlobalJackpotData();
     }
     
     receive() external payable {}
@@ -192,8 +207,18 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function SpinSimpWheel(bool _override) external payable nonReentrant {
 
+        if(winningNumber == 0){
+            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, seed));
+        }
+
         globalLotteryData storage Lotto = globallotto[0];
         userLotteryData storage User = userlotto[_msgSender()];
+
+        if(User.lastDailySpin == 0) {
+            updateUserNumbers(_msgSender());
+            updateUserJackpotData(_msgSender());
+            User.lastSpinTime = 0;
+        }
         
         randNonce++;
 
@@ -236,7 +261,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         payable(this).transfer(msg.value);
 
-        if(roll != winningRoll && !adminWinner) {
+        if(roll != winningNumber && !adminWinner) {
 
             if (roll > winningRoll) { //winning of some kind
 
@@ -262,6 +287,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                     ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
                 }
 
+                if(nftbonusenabled) {
+                    if(roll >= mintbonuspercent) {
+                        ITeazeFarm(farmingContract).mintToken(true);
+                    }
+                }
+
 
                 if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
                     saveLatestPrice();
@@ -275,6 +306,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                     uint256 netamount = address(this).balance.mul(overage).div(100);
                     
                     marketBuy(netamount);
+
+                    jackpotLimit = uint128(uint(jackpotLimit).add(uint(jackpotLimit).mul(overage).div(100)));
+                    
 
                 } else {
 
@@ -306,7 +340,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
             payable(_msgSender()).transfer(netamount);
 
-            winningRoll = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
+            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
+
+            jackpotLimit = uint128(uint(jackpotLimit).div(2));
 
             emit Jackpot(jackpotamt, roll, _msgSender());
 
@@ -373,13 +409,11 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         simpCardBonusEnabled = _status;
     }
 
-    // This will allow to rescue ETH sent by mistake directly to the contract
     function rescueETHFromContract() external onlyOwner {
         address payable _owner = payable(_msgSender());
         _owner.transfer(address(this).balance);
     }
 
-    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
@@ -402,7 +436,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         IWETH(WETH).transfer(pair, _netamount);
 
         uint buyTrigger = returnFeeReduction(overrideFee,feeReduction);
-        payable(_msgSender()).transfer(buyTrigger);
+        payable(_msgSender()).transfer(buyTrigger.mul(gasrefund));
 
         address[] memory path = new address[](2);
 
@@ -426,6 +460,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function setAdminWinnner(bool _status) external onlyOwner {
         adminWinner = _status;
+    }
+
+    function setNFTtokenMint(bool _status) external onlyOwner {
+        nftbonusenabled = _status;
     }
 
     function getWinningNumber() external view returns (uint) { //remove for production
@@ -460,6 +498,51 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function changeWinningRoll(uint16 _number) external onlyAuthorized {
         winningRoll = _number;
+    }
+
+    function changeTeazeContract(address _token) external onlyAuthorized {
+        teazetoken = _token;
+    }
+
+    function updateGlobalLotteryNumbers() internal {
+
+        globalLotteryData storage lotto = globallotto[0];
+        
+        (lotto.globalSpins,
+        lotto.globalWins,
+        lotto.globalSBX,
+        lotto.globalTeaze,
+        lotto.globalBNBTeaze,
+        ,
+        ) = LastLotto(lastLottery).globallotto(0);
+        
+    }
+
+    function updateUserNumbers(address _holder) internal {
+        userLotteryData storage user = userlotto[_holder];
+
+        (user.lastSpinTime,
+        user.lastDailySpin,
+        user.totalSBX,
+        user.totalSpins,
+        user.totalWins,
+        ,
+        ) = LastLotto(lastLottery).userlotto(_holder);
+
+    }
+
+    function updateUserJackpotData(address _holder) internal {
+        userLotteryData storage userStackTooDeep = userlotto[_holder];
+
+        (,,,,,userStackTooDeep.totalJackpots,
+        userStackTooDeep.totalJackpotsBNB) = LastLotto(lastLottery).userlotto(_holder);
+    }
+
+    function updateGlobalJackpotData() internal {
+        globalLotteryData storage LottoStackTooDeep = globallotto[0];
+
+        (,,,,,LottoStackTooDeep.globalJackpots,
+        LottoStackTooDeep.globalJackpotsBNB) = LastLotto(lastLottery).globallotto(0);
     }
 
 }
