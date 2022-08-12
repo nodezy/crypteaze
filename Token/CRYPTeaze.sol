@@ -229,7 +229,7 @@ contract DividendDistributor is IDividendDistributor {
 
 
     function addBNB() external payable override onlyToken {
-        uint256 amount = msg.value;
+        //uint256 amount = msg.value;
     }
 
     function addBNBnetDivs() external payable override onlyToken {
@@ -552,7 +552,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     string constant _symbol = "Teaze";
     uint8 constant _decimals = 9;
 
-    uint256 _totalSupply = 1000000000000 * (10 ** _decimals);
+    uint256 _totalSupply = 2000000000000 * (10 ** _decimals);
     uint256 public _maxTxAmountBuy = _totalSupply;
     uint256 public _maxTxAmountSell = _totalSupply; 
     uint256 public _maxWalletToken = _totalSupply; 
@@ -578,10 +578,11 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     uint256 initialBlockLimit = 1;
 
-    uint256 public totalFee = 50; //(5%)
-    uint256 public lotteryFee = 100;
-    uint256 public nftmarketingFee = 100;
-    uint256 public lootboxFee = 100;
+    uint256 public totalFee = 60; //(6%)
+    uint256 public lotteryFee = 200;
+    uint256 public nftmarketingFee = 200;
+    uint256 public lootboxFee = 200;
+    uint256 public burnRatio = 167;
     
     uint256 public feeDenominator = 1000;
     uint256 discountOffset = 1;
@@ -613,7 +614,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     bool public enablePartners = false;
     bool public enableOracle = false;
     bool public airdropEnabled = false;
-    bool public launchEnabled = false;
+    bool public launchEnabled = true;
 
     bool inSwap;
     
@@ -652,9 +653,9 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         isDividendExempt[address(this)] = true;
         isDividendExempt[DEAD] = true;
 
-        lotteryAddress = 0x697F1cEF29E55d547313e814EC804B45e5ce0a2E;
+        lotteryAddress = 0x02A03672407f257dD220e47c82190a54D68cbA7f;
         nftMarketingWallet = 0x5f80944EFB28Fee140BE74e57E22235D79ffda19;
-        lootBoxAddress = 0x02A03672407f257dD220e47c82190a54D68cbA7f;
+        lootBoxAddress = 0x1689C959785eD8d626b905f6F0BE95156E7837f9;
 
         isFeeExempt[lotteryAddress] = true;
         isFeeExempt[nftMarketingWallet] = true;
@@ -827,6 +828,12 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
         uint256 amountToSwap = IBEP20(address(this)).balanceOf(address(this));
 
+        uint256 burnAmount = amountToSwap.mul(burnRatio).div(feeDenominator);
+
+        IBEP20(address(this)).transfer(address(DEAD), burnAmount);
+
+        amountToSwap = amountToSwap.sub(burnAmount);
+
         address[] memory path = new address[](2);
         path[0] = address(this);
         path[1] = WETH;
@@ -849,9 +856,9 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         //Deposit to the team wallets
         if (teamWalletDeposit) {
 
-        uint256 amountBNBlotto = 0;
-        uint256 amountBNBnft = 0;
-        uint256 amountBNBloot = 0;
+        uint256 amountBNBlotto;
+        uint256 amountBNBnft;
+        uint256 amountBNBloot;
 
         uint256 amountTotatBNBFee;
 
