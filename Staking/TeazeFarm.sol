@@ -85,6 +85,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     PoolInfo[] public poolInfo; // Info of each pool.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo; // Info of each user that stakes LP tokens.
+    mapping(address => bool) public addedLpTokens; // Used for preventing LP tokens from being added twice in add().
+    mapping(uint256 => mapping(address => uint256)) public unstakeTimer; // Used to track time since unstake requested.
+    mapping(address => uint256) private userBalance; // Balance of SimpBux for each user that survives staking/unstaking/redeeming.
+    mapping(address => bool) private promoWallet; // Whether the wallet has received promotional SimpBux.
+    mapping(address => uint256) private mintToken; // Whether the wallet has received a mint token from the lottery.
+    mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not. 
     
     uint256 public totalAllocPoint; // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public startBlock; // The block number when SimpBux token mining starts.
@@ -95,49 +101,45 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
-    bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
+    
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
     uint256 public minLPStake = 250000000000000000; //min lp stake amount (default .25 LP tokens).
     uint256 public maxLPStake = 210000000000000000000; //max lp stake amount (default 210 LP tokens).
-    uint256 public promoAmount = 20000000000; //amount of SimpBux to give to new stakers (default 20 SimpBux).
+    uint256 public promoAmount = 200000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
     uint256 public stakedDiscount = 30; //amount the price of a pack mint is discounted if the user is staked (default 30%). 
     uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets. Higher value = higher buyback sent to stakepool (default 50%).
     uint256 public nftMarketingSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
     uint256 public lootboxSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
-    bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
+    
     uint256 public rewardSegment = poolReward.mul(100).div(200); //reward segment for dynamic staking.
     uint256 public ratio; //ratio of pool0 to pool1 for dynamic staking.
     uint256 public lpalloc = 65; //starting pool allocation for LP side.
     uint256 public stakealloc = 35; //starting pool allocation for Teaze side.
     uint256 public allocMultiplier = 5; //ratio * allocMultiplier to balance out the pools.
-    bool public dynamicStakingActive = true; //whether the staking pool will auto-balance rewards or not.
 
-    mapping(address => bool) public addedLpTokens; // Used for preventing LP tokens from being added twice in add().
-    mapping(uint256 => mapping(address => uint256)) public unstakeTimer; // Used to track time since unstake requested.
-    mapping(address => uint256) private userBalance; // Balance of SimpBux for each user that survives staking/unstaking/redeeming.
-    mapping(address => bool) private promoWallet; // Whether the wallet has received promotional SimpBux.
-    mapping(address => bool) private mintToken; // Whether the wallet has received a mint token from the lottery.
     uint256 public totalEarnedLoot; //Total amount of BNB sent for lootbox creation.
     uint256 public totalEarnedLotto; //Total amount of BNB used to buy token before being sent to stakepool.
     uint256 public totalEarnedNFT; // Total amount of BNB NFT creation wallet to fund new NFTs.
-    mapping(uint256 =>mapping(address => bool)) public userStaked; // Denotes whether the user is currently staked or not.
-    
+
+    uint256 public simpCardRedeemDiscount = 10;
 
     address public SimpBuxAddress; //SimpBux contract address
     address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
     address public lootboxAddress; //lootbox address
     address public packsContract; //SimpPacks
     address public simpCardContract;
-    bool simpCardBonusEnabled = false;
-    uint simpCardRedeemDiscount = 10;
-    
     address public teazelotto; //teaze lotto address
     address public nftContract;
     address public teazetoken; //teaze token
-    IERC20 iteazetoken; 
 
-    uint256 marketBuyGas = 450000;
+    bool simpCardBonusEnabled = false;
+    bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
+    bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
+    bool public dynamicStakingActive = true; //whether the staking pool will auto-balance rewards or not.
+    
+    
+    IERC20 iteazetoken; 
 
     event Unstake(address indexed user, uint256 indexed pid);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
@@ -339,7 +341,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 pool.lpToken.safeTransferFrom(address(_msgSender()), address(this), _amount);
             }
             
-        
             unstakeTimer[_pid][_msgSender()] = 9999999999;
             userStaked[_pid][_msgSender()] = true;
 
@@ -371,8 +372,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         unstakeTimer[_pid][_msgSender()] = block.timestamp.add(unstakeTime);
         userStaked[_pid][_msgSender()] = false;
-        
-
     }
 
     //Get time remaining until able to withdraw tokens
@@ -385,7 +384,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
-    // Withdraw LP tokens from TeazeFarming
+    // Withdraw LP tokens from TeazeFarmi
     function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
 
         PoolInfo storage pool = poolInfo[_pid];
@@ -622,7 +621,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     //redeem the NFT with SimpBux only
-    function redeem(uint256 _packid) public nonReentrant {
+    function redeem(uint256 _packid, bool _withMintToken) public nonReentrant {
 
         require(packsContract != address(0), "Packs address invalid");
         require(ITeazePacks(packsContract).getPackTimelimitFarm(_packid), "Pack has expired");
@@ -631,33 +630,43 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
    
         (,,,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(packsContract).getPackInfo(_packid);
     
-        require(packRedeemable, "This NFT is not redeemable with SimpBux");
+        require(packRedeemable, "This NFT is not redeemable with SimpBux or mint tokens");
         require(packMinted < packMintLimit, "This NFT has reached its mint limit");
-
+         
         uint256 price = getSimpCardPackPrice(_packid, _msgSender());
 
         require(price > 0, "NFT not found");
 
-        redeemTotalSBXRewards(_msgSender());
+        if(_withMintToken) {
 
-        if (userBalance[_msgSender()] < price) {
+            require(mintToken[_msgSender()] > 0, "You have no mint tokens to mint with");
+            mintToken[_msgSender()] = mintToken[_msgSender()] - 1;
+            ITeazePacks(packsContract).premint(_msgSender(), _packid);
+
+        } else { 
+
+            redeemTotalSBXRewards(_msgSender());
+
+            if (userBalance[_msgSender()] < price) {
             
-            IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
-            require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-            ITeazePacks(packsContract).premint(_msgSender(), _packid);
-            IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
+                IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
+                require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
+                ITeazePacks(packsContract).premint(_msgSender(), _packid);
+                IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
-        } else {
+            } else {
 
-            require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
-            ITeazePacks(packsContract).premint(_msgSender(), _packid);
-            userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
+                require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
+                ITeazePacks(packsContract).premint(_msgSender(), _packid);
+                userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
-        }
+            }
+
+        }       
 
     }
 
-    // users can also purchase the NFT with $teaze token and the proceeds can be split between nft creation address, lootbox address, and the staking pool
+    // users can also purchase the NFT with $teaze token and the proceeds can be split between nft creation address, lootbox contract, and the lotto pool
     function purchase(uint256 _packid) public payable nonReentrant {
 
         require(packsContract != address(0), "Packs address invalid");
@@ -882,9 +891,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     }
 
-    function changeBuyGasLimit(uint256 _gasLimitAmount) external onlyAuthorized {
-        marketBuyGas = _gasLimitAmount;
-    }
 
     function updateStakedDiscount(uint256 _stakedDiscount) external onlyAuthorized {
         require(_stakedDiscount >= 0 && _stakedDiscount <= 50, "staker discount must be between 0 and 50 percent");
@@ -937,12 +943,17 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
-    function setMintToken(bool _status, address _holder) external {
+    function inscreaseMintToken(address _holder) external {
         require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
-        mintToken[_holder] = _status;
+        mintToken[_holder] = mintToken[_holder] + 1;
     }
 
-    function hasMintToken(address _holder) public view returns (bool) {
+    function decreaseMintToken(address _holder) external {
+        require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
+        if(mintToken[_holder] > 0) {mintToken[_holder] = mintToken[_holder] - 1;}
+    }
+
+    function getMintTokens(address _holder) public view returns (uint) {
         return mintToken[_holder];
     }
     
