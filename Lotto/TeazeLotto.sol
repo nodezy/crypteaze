@@ -164,6 +164,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint16 public winningRoll = 499; //adjustable roll # so SBX win % can be 50/50 
     uint16 public spinFrequencyReduction = 3600;
     uint16 public mintbonuspercent = 975;
+    uint16 public  sbxbonuspercent = 950;
     uint24 marketBuyGas = 230000;  
     uint24 public spinFrequency = 18000;    //18000 for production
     uint32 public priceCheckInterval = 900;   //900 for production
@@ -177,6 +178,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
     bool public simpCardBonusEnabled = false;
     bool public nftbonusenabled = false;
+    bool public sbxbonusenabled = false;
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
@@ -283,13 +285,20 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 Lotto.globalSBX += uint32(userReward);
 
                 
-                if(staked) {
+                if(staked) { //remove for production
                     ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
                 }
 
                 if(nftbonusenabled) {
                     if(roll >= mintbonuspercent) {
                         ITeazeFarm(farmingContract).mintToken(true);
+                    }
+                }
+
+                if(sbxbonusenabled) {
+                    if(roll >= sbxbonuspercent) {
+                        require(IERC20(simpbux).balanceOf(address(this)) > 0, "SimpBux token balance of this contract is insufficient");
+                        IERC20(simpbux).transfer(_msgSender(), 1000000000); //SimpBux
                     }
                 }
 
@@ -458,19 +467,23 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     }
 
-    function setAdminWinnner(bool _status) external onlyOwner {
+    function setAdminWinnner(bool _status) external onlyAuthorized { //remove for production
         adminWinner = _status;
     }
 
-    function setNFTtokenMint(bool _status) external onlyOwner {
+    function setNFTtokenMint(bool _status) external onlyAuthorized {
         nftbonusenabled = _status;
+    }
+
+    function setSBXtoken(bool _status) external onlyAuthorized {
+        sbxbonusenabled = _status;
     }
 
     function getWinningNumber() external view returns (uint) { //remove for production
         return winningNumber;
     }
 
-    function changeOracle(address _oracle) external onlyOwner {
+    function changeOracle(address _oracle) external onlyAuthorized {
         oracle = IOracle(_oracle);
     }
 
