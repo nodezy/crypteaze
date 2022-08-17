@@ -113,6 +113,16 @@ interface IWETH {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
 }
 
+interface Directory {
+    function getDiscount1() external view returns (address);
+    function getDiscount2() external view returns (address);
+    function getDiscount3() external view returns (address);
+    function getTeazeToken() external view returns (address);
+    function getPair() external view returns (address);
+    function getFarm() external view returns (address);
+    function getInserter() external view returns (address);
+}
+
 contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeMath for uint16;
@@ -143,25 +153,13 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     mapping(address => userLotteryData) public userlotto; 
     
     IOracle public oracle;
-    IERC20 simpbux;
-    IERC20 discountToken1;
-    IERC20 discountToken2;
-    IERC20 discountToken3;
     IDEXRouter router;
-    Inserter private inserter;
+    Directory public directory;
 
-    address public farmingContract;
     address public simpCardContract;
-    address teazetoken = 0xB34cd7Cc532f108238d1EeC1de8Ce0aeD7dDE5Eb; //teaze token
-    address lastLottery = 0xac80B11D63222e1466C06664932158a8e3b998bC;
-    address pair;
+    address lastLottery;
     address WETH;
-    address discountAddress1 = 0x3192aB9Abe48d91fC9C6f42Ab00dfEA65C544522; //0.5%
-    address discountAddress2 = 0x981f941FcF410800200C18b539fB0005Cd58f85A; //1.0%
-    address discountAddress3 = 0x7c0372B59Fc1cf55ce99aa4f1b73Ba1233B122a3; //1.5%
 
-    address[] public discountArray = [discountAddress1,discountAddress2,discountAddress3];
-    
     uint8 public feeReduction = 4; //amount we want overrideFee reduced for spin & trigger fees
     uint8 public overrideFee = 1;  //override fee in whole USD  
     uint8 public winningPercent = 50;
@@ -198,14 +196,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     event DiscountTokenSent(bool indexed status);
     event MintTokenAdded(bool indexed status);
 
-    constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _seed) {
-       farmingContract = _farmingContract;
-       pair = _pair;
+    constructor(address _directory, address _router, address _lastlottery, uint16 _seed) {
+       directory = Directory(_directory);
        authorized[owner()] = true;
-       inserter = Inserter(_inserter);
-       randNonce = inserter.getNonce();
-       inserter.makeActive();
-       oracle = IOracle(_oracle);
+       randNonce = Inserter(directory.getInserter()).getNonce();
+       Inserter(directory.getInserter()).makeActive();
+       lastLottery = _lastlottery;
        seed = _seed;
        
        router = _router != address(0)
@@ -223,7 +219,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     function SpinSimpWheel(bool _override) external payable nonReentrant {
 
         if(winningNumber == 0){
-            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, seed));
+            winningNumber = uint16(Inserter(directory.getInserter()).getRandLotto(randNonce, seed));
         }
 
         globalLotteryData storage Lotto = globallotto[0];
@@ -241,9 +237,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         User.totalSpins++;
                 
-        bool staked = ITeazeFarm(farmingContract).getUserStaked(_msgSender());
+        bool staked = ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender());
 
-       // require(staked, "User must be staked to spin the SimpWheel of Fortune");
+       // require(staked, "User must be staked to spin the SimpWheel of Fortune");  //uncomment for production
     
         if(!_override) {
             if(User.lastSpinTime != 0) {
@@ -266,7 +262,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         uint16 roll;
 
-        roll = uint16(Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 1000));
+        roll = uint16(Inserter(directory.getInserter()).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 1000));
         
         roll += 1; //normalize 1-1000
 
@@ -298,20 +294,25 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 Lotto.globalSBX += uint32(userReward);
 
                 
-                if(staked) { //remove for production
-                    ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
+                if(staked) { //remove if(staked) {} for production, leave function
+                    ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
                 }
 
                 if(nftbonusenabled) {
                     if(roll >= mintbonuspercent || mintTokenWin) {
-                        ITeazeFarm(farmingContract).increaseMintToken(_msgSender());
+                        ITeazeFarm(directory.getFarm()).increaseMintToken(_msgSender());
                     }
                 }
 
                 if(discountbonusenabled) {
                     if(roll >= discountbonuspercent || discountTokenWin) {
 
-                        uint discountRoll = uint16(Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 300));
+                        address[] memory discountArray = new address[](3);
+                        discountArray[0] = directory.getDiscount1();
+                        discountArray[1] = directory.getDiscount2();
+                        discountArray[2] = directory.getDiscount3();
+
+                        uint discountRoll = uint16(Inserter(directory.getInserter()).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 300));
                         discountRoll = discountRoll.div(100);
 
                         require(IERC20(discountArray[discountRoll]).balanceOf(address(this)) > 0, "Discount token balance of this contract is insufficient");
@@ -319,6 +320,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                             IERC20(discountArray[discountRoll]).transfer(_msgSender(), 1000000000); //DiscountToken
                             emit DiscountTokenSent(true);
                         } else {
+                            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), 100000000000); //give 100 SBX bonus if discount is already held
                             emit DiscountTokenSent(false);
                         }
                         
@@ -372,7 +374,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
             payable(_msgSender()).transfer(netamount);
 
-            winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, roll));
+            winningNumber = uint16(Inserter(directory.getInserter()).getRandLotto(randNonce, roll));
 
             jackpotLimit = uint128(uint(jackpotLimit).div(2));
 
@@ -417,10 +419,6 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         if (IERC721(simpCardContract).balanceOf(_holder) > 0) {return true;} else {return false;}
     }
 
-    function changeFarmingContract(address _contract) external onlyAuthorized {
-        require(_contract != address(0), "Farming contract must not be the zero address");
-        farmingContract = _contract;
-    }
 
     function changeSimpCardContract(address _contract) external onlyAuthorized {
         require(_contract != address(0), "Farming contract must not be the zero address");
@@ -462,10 +460,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         Lotto.globalBNBTeaze += uint128(_netamount);
 
-        uint balanceBefore = IERC20(teazetoken).balanceOf(farmingContract);
+        uint balanceBefore = IERC20(directory.getTeazeToken()).balanceOf(directory.getFarm());
 
         IWETH(WETH).deposit{value : _netamount}();
-        IWETH(WETH).transfer(pair, _netamount);
+        IWETH(WETH).transfer(directory.getPair(), _netamount);
 
         uint buyTrigger = returnFeeReduction(overrideFee,feeReduction);
         payable(_msgSender()).transfer(buyTrigger.mul(gasrefund));
@@ -473,16 +471,16 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         address[] memory path = new address[](2);
 
         path[0] = WETH;
-        path[1] = teazetoken;
+        path[1] = directory.getTeazeToken();
 
         router.swapExactETHForTokensSupportingFeeOnTransferTokens{value:buyTrigger, gas:marketBuyGas}(
             0,
             path,
-            address(farmingContract),
+            address(directory.getFarm()),
             block.timestamp
         );
 
-        uint balanceNow = IERC20(teazetoken).balanceOf(farmingContract);
+        uint balanceNow = IERC20(directory.getTeazeToken()).balanceOf(directory.getFarm());
 
         Lotto.globalTeaze += uint128(balanceNow.sub(balanceBefore));
 
@@ -520,7 +518,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     }
 
     function getNewWinningNumber() external onlyAuthorized {
-        winningNumber = uint16(Inserter(inserter).getRandLotto(randNonce, winningNumber));
+        winningNumber = uint16(Inserter(directory.getInserter()).getRandLotto(randNonce, winningNumber));
     }
 
     function returnFeeReduction(uint _amount, uint _reduction) public view returns (uint) {
@@ -534,10 +532,6 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
     function changeWinningRoll(uint16 _number) external onlyAuthorized {
         winningRoll = _number;
-    }
-
-    function changeTeazeContract(address _token) external onlyAuthorized {
-        teazetoken = _token;
     }
 
     function updateGlobalLotteryNumbers() internal {
@@ -581,10 +575,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         LottoStackTooDeep.globalJackpotsBNB) = LastLotto(lastLottery).globallotto(0);
     }
 
-    function setDiscountTokens(address _token1, address _token2, address _token3) external onlyAuthorized {
-        discountAddress1 = _token1;
-        discountAddress2 = _token2;
-        discountAddress3 = _token3;
+    function changeDirectory(address _directory) external onlyAuthorized {
+        directory = Directory(_directory);
     }
 
 }
