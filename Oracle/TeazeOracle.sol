@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.9;
 
@@ -104,18 +104,22 @@ interface IPancakePair {
     function initialize(address, address) external;
 }
 
+interface Directory {
+    function getPair() external view returns (address);
+}
+
 contract TeazeOracle is Ownable {
 
     using SafeMath for uint256;
 
     AggregatorV3Interface internal priceFeed;
-    IPancakePair public LP;
+    Directory public directory;
+    
+    uint256 setPrice = 500; //public sale price, sets the bottom limit for dynamic discount
 
-    uint256 setPrice = 1;
-
-    constructor() {
+    constructor(address _directory) {
         priceFeed = AggregatorV3Interface(0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526);  //bscmainet bnb/usd 0x0567f2323251f0aab15c8dfb1967e4e8a7d42aee
-        LP = IPancakePair(0xe9DDB9847A7a6801d458a591e9C61D2a8a796874);
+        directory = Directory(_directory);
     }
 
     receive() external payable {}
@@ -135,7 +139,7 @@ contract TeazeOracle is Ownable {
     }
 
     function getReserves() public view returns (uint256 reserve0, uint256 reserve1) {
-      (uint256 Res0, uint256 Res1,) = LP.getReserves();
+      (uint256 Res0, uint256 Res1,) = IPancakePair(directory.getPair()).getReserves();
       return (Res0, Res1);
     }
 
@@ -146,10 +150,10 @@ contract TeazeOracle is Ownable {
       
       (uint256 pooledBNB, uint256 pooledTEAZE) = getReserves();
 
-      IBEP20 token0 = IBEP20(LP.token0()); //BNB
-      IBEP20 token1 = IBEP20(LP.token1()); //TEAZE  
+      IBEP20 token0 = IBEP20(IPancakePair(directory.getPair()).token0()); //BNB
+      IBEP20 token1 = IBEP20(IPancakePair(directory.getPair()).token1()); //TEAZE  
 
-      pooledBNB = pooledBNB.div(10**token0.decimals()); //make pooled bnb have 9 decimals
+      pooledBNB = pooledBNB.div(10**token1.decimals()); //divide by non-BNB token decimals
 
       uint256 pooledBNBUSD = pooledBNB.mul(bnbusdprice); //multiply pooled bnb x usd price of 1 bnb
       uint256 teazeUSD = pooledBNBUSD.div(pooledTEAZE); //divide pooled bnb usd price by amount of pooled TEAZE
@@ -170,7 +174,7 @@ contract TeazeOracle is Ownable {
       return totalbnb;
     }
 
-    //for the token swap bonus; input is in BNB!
+    //Get Teaze equivalent of BNB input
     function getbnbequivalent(uint256 amount) external view returns (uint256) {
       (uint256 bnbusd,,uint256 teazeusd) = getTeazeUSDPrice();
       if (teazeusd < setPrice) {
@@ -182,27 +186,33 @@ contract TeazeOracle is Ownable {
       return tempteaze.div(10**9);
     }
 
+    function getbnbusdequivalent(uint256 amount) external view returns (uint256) {
+      uint256 bnbusdprice = getLatestPrice();
+      bnbusdprice = bnbusdprice.mul(10); //make bnb usd price have 9 decimals
+      uint256 bnb = 1000000000000000000;
+      uint bnbfactor = bnb.div(bnbusdprice);
+      return (amount.mul(bnbfactor.mul(10**9)));
+    }
+
     function TZOnline() external pure returns (bool) {
       return true;
-    }
-    
-    function changePair(address _pair) external onlyOwner {
-      LP = IPancakePair(_pair);
     }
     
     function changeSetPrice(uint256 _amount) external onlyOwner {
       setPrice = _amount;
     }
 
-    // This will allow to rescue ETH sent by mistake directly to the contract
     function rescueBNBFromContract() external onlyOwner {
         address payable _owner = payable(_msgSender());
         _owner.transfer(address(this).balance);
     }
 
-    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
-    function transferBEP20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+    function transferBEP20Tokens(address _tokenAddr, address _to, uint _amount) external onlyOwner {
        
         IBEP20(_tokenAddr).transfer(_to, _amount);
+    }
+
+    function changeDirectory(address _directory) external onlyOwner {
+        directory = Directory(_directory);
     }
 }
