@@ -34,6 +34,14 @@ interface ISimpCrates {
     function checkIfLootbox(address _checker) external;
 }
 
+interface Directory {
+    function getFarm() external view returns (address);
+    function getNFT() external view returns (address);
+    function getCrates() external view returns (address);
+    function getInserter() external view returns (address);
+    
+}
+
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
@@ -84,23 +92,19 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
 
-    Inserter private inserter;
-    ISimpCrates public simpcrates;
-    address public nftContract; // Address of the associated farming contract.
-    address public farmingContract; // Address of the associated farming contract.
+    Directory public directory;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
     uint256 timeEnding = 2592000; //default pack lifetime of 30 days.
     uint256 nftburnratio = 100;
     uint256 nftburnmultiple = 5;
-    
-    constructor(address _nftContract, address _farmingContract, address _inserter) {
-        nftContract = _nftContract;
-        farmingContract = _farmingContract;
-        inserter = Inserter(_inserter);
-        randNonce = inserter.getNonce();
-        inserter.makeActive();
+     
+    constructor(address _directory) {
+        directory = Directory(_directory);
+        authorized[owner()] = true;
+        randNonce = Inserter(directory.getInserter()).getNonce();
+        Inserter(directory.getInserter()).makeActive();
         addWhitelisted(owner());
     }
 
@@ -110,13 +114,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         randNonce++;
 
-        uint256 nftbalance = IERC721(nftContract).balanceOf(_recipient);
+        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_recipient);
         if (_recipient != owner()) {
             require(nftbalance <= 100, "E01");
         }
         
-        require(address(farmingContract) != address(0), "E02");
-        require(msg.sender == address(farmingContract), "E03");
+        require(address(directory.getFarm()) != address(0), "E02");
+        require(msg.sender == address(directory.getFarm()), "E03");
 
         PackInfo storage packinfo = packInfo[_packid];
 
@@ -133,7 +137,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         require(percentTotal >= 100, "E29");
 
-        uint256 roll = inserter.getRandMod(randNonce, _packid, percentTotal); //get user roll 0-99
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, percentTotal); //get user roll 0-99
         
         uint256[] memory array = new uint256[](percentTotal); //create array from 0-99
 
@@ -164,9 +168,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         PackNFTmints[_packid] = PackNFTmints[_packid] + 1;
 
-        simpcrates.checkIfLootbox(_recipient);
+        ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
 
-        return ITeazeNFT(nftContract).mint(_recipient, nftinfo.uri, nftid);
+        return ITeazeNFT(directory.getNFT()).mint(_recipient, nftinfo.uri, nftid);
 
     }
 
@@ -176,18 +180,6 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return token.balanceOf(_holder);
     }
     
-    function setNFTContract(address _address) public onlyAuthorized {
-        nftContract = _address;
-    }
-
-    function setFarmingContract(address _address) public onlyAuthorized {
-        farmingContract = _address;
-    }
-
-    function setCratesContract(address _address) public onlyAuthorized {
-        simpcrates = ISimpCrates(_address);
-    }
-
     function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, uint256 _timeend, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "E06"); 
         require(bytes(_collectionName).length > 0, "E07");
@@ -577,7 +569,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function packPurchased(address _recipient, uint256 _packid) external {
 
-        require(msg.sender == address(farmingContract), "E20");
+        require(msg.sender == address(directory.getFarm()), "E20");
 
         userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
     }
@@ -722,7 +714,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     function getNFTSBXburnAmount(uint _tokenID) public view returns (uint) {
-        uint percent = getNFTPercent(getIDbyURI(ITeazeNFT(nftContract).tokenURI(_tokenID)));
+        uint percent = getNFTPercent(getIDbyURI(ITeazeNFT(directory.getNFT()).tokenURI(_tokenID)));
 
         uint SBXamount = (nftburnratio.sub(percent)).mul(nftburnratio);
 
@@ -731,11 +723,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function burnNFTforSBX(uint _tokenID) external {
         
-        require(IERC721(nftContract).ownerOf(_tokenID) == address(_msgSender()), "E34");
-        require(ITeazeFarm(farmingContract).getUserStaked(_msgSender()), "E35");
+        require(IERC721(directory.getNFT()).ownerOf(_tokenID) == address(_msgSender()), "E34");
+        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
        
-        ITeazeFarm(farmingContract).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(_tokenID)); 
-        IERC721(nftContract).safeTransferFrom(_msgSender(), DEAD, _tokenID);
+        ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(_tokenID)); 
+        IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), DEAD, _tokenID);
+    }
+
+    function changeDirectory(address _directory) external onlyAuthorized {
+        directory = Directory(_directory);
     }
 
 }
