@@ -9,6 +9,12 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+interface Directory {
+    function getNFT() external view returns (address);
+    function getPacks() external view returns (address);
+    function getCrates() external view returns (address);
+}
+
 contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
@@ -37,17 +43,11 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
       bool sold
     );
 
-    address public feeReceiver; //change to lootbox contract
-    address public packsContract;
-    IERC721 public crypteazeNFT;
+    Directory public directory;
     uint256 public feeTotals;
 
-    constructor(address _packsContract, address _nftContract)  {
-
-      feeReceiver = address(_packsContract);
-      packsContract = address(_packsContract);
-      crypteazeNFT = IERC721(_nftContract); //crypteaze nft
-
+    constructor(address _directory)  {
+      directory = Directory(_directory);
     }   
 
     receive() external payable {}
@@ -60,16 +60,6 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     /* Updates the buying price of the contract */
     function updatebuyingFee(uint _buyingFee) external onlyOwner {
       buyingFee = _buyingFee;
-    }
-
-    /* Updates the NFT contract */
-    function updateNFTcontract(address _NFTcontract) external onlyOwner {
-      crypteazeNFT = IERC721(_NFTcontract);
-    }
-
-    /* Updates the fee receiver */
-    function updateFeeReceiver(address _feeReceiver) external onlyOwner {
-      feeReceiver = _feeReceiver;
     }
 
     /* Returns the listing price of the contract */
@@ -96,9 +86,9 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
         false
       );
 
-      crypteazeNFT.safeTransferFrom(msg.sender, address(this), tokenId);
+      IERC721(directory.getNFT()).safeTransferFrom(msg.sender, address(this), tokenId);
 
-      payable(feeReceiver).transfer(listingFee);
+      payable(directory.getCrates()).transfer(listingFee);
 
       feeTotals = feeTotals.add(listingFee);
 
@@ -123,7 +113,7 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
       idToMarketItem[tokenId].owner = payable(address(0));
       _itemsHeld.decrement();
 
-      crypteazeNFT.safeTransferFrom(address(this), msg.sender, tokenId);
+      IERC721(directory.getNFT()).safeTransferFrom(address(this), msg.sender, tokenId);
     }
 
     /* Creates the sale of a marketplace item */
@@ -139,8 +129,8 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
       idToMarketItem[tokenId].seller = payable(address(0));
       _itemsHeld.decrement();
       _itemsSold.increment();
-      crypteazeNFT.safeTransferFrom(address(this), msg.sender, tokenId);
-      payable(feeReceiver).transfer(buyingFee);
+      IERC721(directory.getNFT()).safeTransferFrom(address(this), msg.sender, tokenId);
+      payable(directory.getCrates()).transfer(buyingFee);
       feeTotals = feeTotals.add(buyingFee);
       payable(seller).transfer(msg.value.sub(buyingFee));
     }
@@ -227,4 +217,7 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
 
+    function changeDirectory(address _directory) external onlyOwner {
+        directory = Directory(_directory);
+    }
 }
