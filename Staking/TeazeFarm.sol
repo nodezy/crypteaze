@@ -943,7 +943,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
-    function inscreaseMintToken(address _holder) external {
+    function increaseMintToken(address _holder) external {
         require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
         mintToken[_holder] = mintToken[_holder] + 1;
     }
