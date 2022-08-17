@@ -75,6 +75,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     uint256 public lootboxdogNormalizer = 31;
     uint256 private randNonce;
     uint256 public rollFee = 0.001 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
+    uint256 public gasRefund = 0.0045 ether; //Amount to refund user who triggers the creation of a simpcrate
     uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
     uint256 timeEnder = 86400; //time multiplier for when lootboxes end, based on mintclass (defautl 1 week)
     uint256 timeEndingFactor = 234; //will be multiplied by timeEnder and mintClass to get dynamic lifetimes on crates based on difficulty
@@ -116,11 +117,13 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     }
 
 
-    function checkIfLootbox() public {
+    function checkIfLootbox(address _checker) external nonReentrant {
+
+        //require(msg.sender == address(packsContract), "Sender is not packs contract");
 
         uint256 _nftids = teazepacks.getCurrentNFTID();
         
-        //if (heldAmount.add(maxRewardAmount) <= address(this).balance && nftids >=3) {
+        //if (heldAmount.add(maxRewardAmount) <= address(this).balance.add(gasRefund) && nftids >=3) {
         if (true) {
 
             //get 'lootboxable' NFT
@@ -197,6 +200,8 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                 unclaimedBoxes.increment();
 
                 activelootboxarray.push(lootboxid); //add lootboxid to loopable array for view function
+
+                payable(_checker).transfer(gasRefund);
 
             }
                     
