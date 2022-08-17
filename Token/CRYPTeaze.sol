@@ -103,6 +103,13 @@ interface IDividendDistributor {
     function changeImpoundTimelimit(uint256 _timelimit) external;
     function changeDistribGas(uint256 _walletGas, uint256 _reinvestGas) external;
     function rescueETHFromContract() external;
+} 
+
+interface Directory {
+    function getNFTMarketing() external view returns (address); 
+    function getLotto() external view returns (address);
+    function getCrates() external view returns (address);
+    function getOracle() external view returns (address);
 }
 
 contract DividendDistributor is IDividendDistributor {
@@ -135,7 +142,6 @@ contract DividendDistributor is IDividendDistributor {
 
     uint256 public totalWithdrawn;
     uint256 public totalReinvested;
-    uint256 public totalDonated;
     uint256 public netDividends;
     uint256 public totalShares;
     uint256 public totalDividends;
@@ -229,7 +235,7 @@ contract DividendDistributor is IDividendDistributor {
 
 
     function addBNB() external payable override onlyToken {
-        //uint256 amount = msg.value;
+
     }
 
     function addBNBnetDivs() external payable override onlyToken {
@@ -512,8 +518,8 @@ contract DividendDistributor is IDividendDistributor {
         return (shares[_holder].amount, shares[_holder].unpaidDividends, shares[_holder].totalRealised, shares[_holder].totalExcluded, shares[_holder].rewardEligible);
     }
 
-    function mathInfo() external view returns (uint256, uint256, uint256, uint256, uint256, uint256, uint256) {
-        return (totalShares, netDividends, totalDistributed, totalReinvested, totalWithdrawn, totalDonated, totalDividends);
+    function mathInfo() external view returns (uint256, uint256, uint256, uint256, uint256, uint256) {
+        return (totalShares, netDividends, totalDistributed, totalReinvested, totalWithdrawn, totalDividends);
     }
 
     function getShareholderExpired(address _holder) external view returns (uint256) {
@@ -599,8 +605,8 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     uint256 public totalLootBox;
 
     IDEXRouter public router;
-    IOracle public oracle;
-    
+    DividendDistributor distributor;
+    Directory public directory;
     address public pair;
 
     uint256 public launchedAt;
@@ -618,7 +624,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     bool inSwap;
     
-    DividendDistributor distributor;
+    
     uint256 distributorGas = 750000;
     uint256 walletGas = 40000;
     uint256 depositGas = 350000;
@@ -627,14 +633,14 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     
     modifier swapping() { inSwap = true; _; inSwap = false; }
 
-    constructor () {
+    constructor (address _directory) {
         
        // router = IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E);  pancake v2
 
         router = IDEXRouter(0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0);  //test pancake router
 
-        oracle = IOracle(0xF69F9bCe97D2d4dDb680642cf0f8Ff09d3E79f39);
-        
+        directory = Directory(_directory);
+
         address _presaler = msg.sender;
             
         WETH = router.WETH();
@@ -652,10 +658,6 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         isDividendExempt[pair] = true;
         isDividendExempt[address(this)] = true;
         isDividendExempt[DEAD] = true;
-
-        lotteryAddress = 0x02A03672407f257dD220e47c82190a54D68cbA7f;
-        nftMarketingWallet = 0x5f80944EFB28Fee140BE74e57E22235D79ffda19;
-        lootBoxAddress = 0x1689C959785eD8d626b905f6F0BE95156E7837f9;
 
         isFeeExempt[lotteryAddress] = true;
         isFeeExempt[nftMarketingWallet] = true;
@@ -789,7 +791,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         
         if (enableOracle && recipient != pair && sender == pair) {
 
-            uint256 discountAmount = oracle.getdiscount(amount);
+            uint256 discountAmount = IOracle(directory.getOracle()).getdiscount(amount);
             discountAmount = discountAmount.div(100000000);
             discountAmount = discountAmount.add(discountOffset);
             discountFee = discountFee.add(discountAmount);
@@ -865,7 +867,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
             if (lotteryContractActive) {
                 amountBNBlotto = amountBNB.mul(lotteryFee).div(feeDenominator);
 
-                (bool successTeam1, /* bytes memory data */) = payable(lotteryAddress).call{value: amountBNBlotto, gas: walletGas}("");
+                (bool successTeam1, /* bytes memory data */) = payable(directory.getLotto()).call{value: amountBNBlotto, gas: walletGas}("");
                 require(successTeam1, "Lottery contract rejected BNB transfer");
 
                 totalLottery = totalLottery.add(amountBNBlotto);
@@ -874,7 +876,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
             if (nftWalletActive) {
                 amountBNBnft = amountBNB.mul(nftmarketingFee).div(feeDenominator);
 
-                (bool successTeam3, /* bytes memory data */) = payable(nftMarketingWallet).call{value: amountBNBnft, gas: walletGas}("");
+                (bool successTeam3, /* bytes memory data */) = payable(directory.getNFTMarketing()).call{value: amountBNBnft, gas: walletGas}("");
                 require(successTeam3, "NFT marketing wallet rejected BNB transfer");
 
                 totalNFTmarketing = totalNFTmarketing.add(amountBNBnft);
@@ -883,7 +885,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
             if (lootContractActive) {
                 amountBNBloot = amountBNB.mul(lootboxFee).div(feeDenominator);
 
-                (bool successTeam4, /* bytes memory data */) = payable(lootBoxAddress).call{value: amountBNBloot, gas: walletGas}("");
+                (bool successTeam4, /* bytes memory data */) = payable(directory.getCrates()).call{value: amountBNBloot, gas: walletGas}("");
                 require(successTeam4, "Staking pool wallet rejected BNB transfer");
 
                 totalLootBox = totalLootBox.add(amountBNBloot);
@@ -976,20 +978,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         nftmarketingFee = _nftmarketingFee;
         lootboxFee = _lootboxFee;
     }
-    
-    function setFeeReceivers(address _lotteryAddress, address _nftMarketingWallet, address _lootBoxAddress) external onlyOwner {
-        require(_lotteryAddress != ZERO, "Charity wallet must not be zero address");
-        require(_nftMarketingWallet != ZERO, "NFT reward wallet must not be zero address");
-        require(_lootBoxAddress != ZERO, "Stakepool wallet must not be zero address");
-         require(_lotteryAddress != DEAD, "Charity wallet must not be dead address");
-        require(_nftMarketingWallet != DEAD, "NFT reward wallet must not be dead address");
-        require(_lootBoxAddress != DEAD, "Stakepool wallet must not be dead address");
-        lotteryAddress = _lotteryAddress;
-        nftMarketingWallet = _nftMarketingWallet;
-        lootBoxAddress = _lootBoxAddress;
-
-    }
-    
+        
     function setSwapBackSettings(bool _enabled, uint256 _amount) external onlyOwner {
         swapEnabled = _enabled;
         swapThreshold = _amount;
@@ -1007,7 +996,6 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         teamWalletDeposit = _status;
     }
 
-
     function viewTeamWalletInfo() public view returns (uint256 reflectDivs, uint256 buybackDivs, uint256 nftDivs, uint256 stakeDivs) {
         return (totalReflect, totalLottery, totalNFTmarketing, totalLootBox);
     }
@@ -1024,7 +1012,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
     }
 
     // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
-    function transferBEP20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+    function transferBEP20Tokens(address _tokenAddr, address _to, uint _amount) external onlyOwner {
         IBEP20(_tokenAddr).transfer(_to, _amount);
     }
 
@@ -1050,10 +1038,6 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     function AddToDistributorNetDivs() external onlyOwner { 
        distributor.addBNBnetDivs{value: address(this).balance}();
-    }
-
-    function changeOracle(address _oracle) external onlyOwner {
-        oracle = IOracle(_oracle);
     }
 
     function GetClaimed(address _holder) external view returns (uint256 pending) {
@@ -1084,7 +1068,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         return distributor.holderInfo(_address);
     }
     
-    function ViewMathInfo() external view returns (uint256 totalshares, uint256 netdividends, uint256 totaldistributed, uint256 totalreinvested, uint256 totalwithdrawn, uint256 totalDonated, uint256 totaldividends) {
+    function ViewMathInfo() external view returns (uint256 totalshares, uint256 netdividends, uint256 totaldistributed, uint256 totalreinvested, uint256 totalwithdrawn, uint256 totaldividends) {
         return distributor.mathInfo();
     }
 
@@ -1224,7 +1208,7 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
         return partneraddr.length;
     }
 
-    function viewPartnership(uint256 _index) external view returns (string memory name, string memory symbol, uint8 decimals, address tokencontract, uint256 minHoldAmount, uint256 discount, bool enabled) {
+    function viewPartnership(uint256 _index) external view returns (string memory name_, string memory symbol_, uint8 decimals_, address tokencontract, uint256 minHoldAmount, uint256 discount, bool enabled) {
         Partners storage tokenpartners = partners[_index];
         string memory token_name = IBEP20(tokenpartners.token_addr).name();
         string memory token_symbol = IBEP20(tokenpartners.token_addr).symbol();
@@ -1264,6 +1248,10 @@ contract CRYPTeaze is IBEP20, Ownable, ReentrancyGuard {
 
     function setDiscountOffset(uint256 _offset) external onlyOwner {
         discountOffset = _offset;
+    }
+
+    function changeDirectory(address _directory) external onlyOwner {
+        directory = Directory(_directory);
     }
 
 }
