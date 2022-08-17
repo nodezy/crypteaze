@@ -41,7 +41,8 @@ interface IOracle {
 interface ITeazeFarm {
     function getUserStaked(address _holder) external view returns (bool);
     function increaseSBXBalance(address _address, uint256 _amount) external;
-    function mintToken(bool _status) external;
+    function getMintTokens(address _holder) external view returns (uint);
+    function increaseMintToken(address _holder) external;
 }
 
 interface Inserter {
@@ -143,6 +144,9 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     
     IOracle public oracle;
     IERC20 simpbux;
+    IERC20 discountToken1;
+    IERC20 discountToken2;
+    IERC20 discountToken3;
     IDEXRouter router;
     Inserter private inserter;
 
@@ -152,7 +156,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     address lastLottery = 0xac80B11D63222e1466C06664932158a8e3b998bC;
     address pair;
     address WETH;
+    address discountAddress1 = 0x3192aB9Abe48d91fC9C6f42Ab00dfEA65C544522; //0.5%
+    address discountAddress2 = 0x981f941FcF410800200C18b539fB0005Cd58f85A; //1.0%
+    address discountAddress3 = 0x7c0372B59Fc1cf55ce99aa4f1b73Ba1233B122a3; //1.5%
 
+    address[] public discountArray = [discountAddress1,discountAddress2,discountAddress3];
+    
     uint8 public feeReduction = 4; //amount we want overrideFee reduced for spin & trigger fees
     uint8 public overrideFee = 1;  //override fee in whole USD  
     uint8 public winningPercent = 50;
@@ -164,7 +173,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint16 public winningRoll = 499; //adjustable roll # so SBX win % can be 50/50 
     uint16 public spinFrequencyReduction = 3600;
     uint16 public mintbonuspercent = 975;
-    uint16 public  sbxbonuspercent = 950;
+    uint16 public  discountbonuspercent = 950;
     uint24 marketBuyGas = 230000;  
     uint24 public spinFrequency = 18000;    //18000 for production
     uint32 public priceCheckInterval = 900;   //900 for production
@@ -178,12 +187,16 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
     bool public simpCardBonusEnabled = false;
     bool public nftbonusenabled = false;
-    bool public sbxbonusenabled = false;
+    bool public discountbonusenabled = false;
+    bool public mintTokenWin = true; //remove for production
+    bool public discountTokenWin = true; //remove for production
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
     event Jackpot(uint indexed amountBNB, uint indexed winningRoll, address indexed winner);
     event PriceHistory(uint indexed timestamp, uint indexed price);
+    event DiscountTokenSent(bool indexed status);
+    event MintTokenAdded(bool indexed status);
 
     constructor(address _farmingContract, address _router, address _pair, address _inserter, address _oracle, uint16 _seed) {
        farmingContract = _farmingContract;
@@ -290,15 +303,25 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 }
 
                 if(nftbonusenabled) {
-                    if(roll >= mintbonuspercent) {
-                        ITeazeFarm(farmingContract).mintToken(true);
+                    if(roll >= mintbonuspercent || mintTokenWin) {
+                        ITeazeFarm(farmingContract).increaseMintToken(_msgSender());
                     }
                 }
 
-                if(sbxbonusenabled) {
-                    if(roll >= sbxbonuspercent) {
-                        require(IERC20(simpbux).balanceOf(address(this)) > 0, "SimpBux token balance of this contract is insufficient");
-                        IERC20(simpbux).transfer(_msgSender(), 1000000000); //SimpBux
+                if(discountbonusenabled) {
+                    if(roll >= discountbonuspercent || discountTokenWin) {
+
+                        uint discountRoll = uint16(Inserter(inserter).getRandMod(randNonce, block.timestamp.add(uint256(keccak256(abi.encodePacked(_msgSender())))%1000000000), 300));
+                        discountRoll = discountRoll.div(100);
+
+                        require(IERC20(discountArray[discountRoll]).balanceOf(address(this)) > 0, "Discount token balance of this contract is insufficient");
+                        if(IERC20(discountArray[discountRoll]).balanceOf(_msgSender()) == 0) {
+                            IERC20(discountArray[discountRoll]).transfer(_msgSender(), 1000000000); //DiscountToken
+                            emit DiscountTokenSent(true);
+                        } else {
+                            emit DiscountTokenSent(false);
+                        }
+                        
                     }
                 }
 
@@ -475,8 +498,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         nftbonusenabled = _status;
     }
 
-    function setSBXtoken(bool _status) external onlyAuthorized {
-        sbxbonusenabled = _status;
+    function setDiscountEnabled(bool _status) external onlyAuthorized {
+        discountbonusenabled = _status;
     }
 
     function getWinningNumber() external view returns (uint) { //remove for production
@@ -556,6 +579,12 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         (,,,,,LottoStackTooDeep.globalJackpots,
         LottoStackTooDeep.globalJackpotsBNB) = LastLotto(lastLottery).globallotto(0);
+    }
+
+    function setDiscountTokens(address _token1, address _token2, address _token3) external onlyAuthorized {
+        discountAddress1 = _token1;
+        discountAddress2 = _token2;
+        discountAddress3 = _token3;
     }
 
 }
