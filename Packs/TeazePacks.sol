@@ -31,7 +31,7 @@ interface Inserter {
 }
 
 interface ISimpCrates {
-    function checkIfLootbox() external;
+    function checkIfLootbox(address _checker) external;
 }
 
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
@@ -164,7 +164,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         PackNFTmints[_packid] = PackNFTmints[_packid] + 1;
 
-        simpcrates.checkIfLootbox();
+        simpcrates.checkIfLootbox(_recipient);
 
         return ITeazeNFT(nftContract).mint(_recipient, nftinfo.uri, nftid);
 
@@ -523,7 +523,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     
 
     // Get pack info
-    function getPackInfo(uint256 _packid) public view returns (uint256,uint256,uint256,uint256,bool,bool) {
+    function getPackInfo(uint256 _packid) internal view returns (uint256,uint256,uint256,uint256,bool,bool) {
         PackInfo storage packinfo = packInfo[_packid];
         return (packinfo.price,packinfo.priceStep,packinfo.sbxprice,packinfo.mintLimit,packinfo.redeemable,packinfo.purchasable);
 
