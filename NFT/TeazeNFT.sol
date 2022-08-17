@@ -19,6 +19,10 @@ interface ITeazePacks {
     function getPackIDbyNFT(uint256 _nftid) external view returns (uint256);
 }
 
+interface Directory {
+    function getPacks() external view returns (address);
+}
+
 // Allows another user(s) to change contract variables
 contract Authorized is Ownable {
 
@@ -53,13 +57,13 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
    
-    address public packsContract; // Address of the associated farming contract.
+    Directory public directory;
     uint private minted;
     
 
-    constructor() ERC721("CryptezeNFT", "TeazeNFT") {
+    constructor(address _directory) ERC721("CryptezeNFT", "TeazeNFT") {
         addAuthorized(owner());
-        
+        directory = Directory(_directory);
     }
 
     receive() external payable {}
@@ -83,8 +87,8 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
     function mint(address _recipient, string memory _uri, uint _packNFTid) public nonReentrant returns (uint256) {
 
-        require(address(packsContract) != address(0), "Packs contract address is invalid");
-        require(msg.sender == address(packsContract), "Minting not allowed outside of the Packs contract");
+        require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
+        require(msg.sender == address(directory.getPacks()), "Minting not allowed outside of the Packs contract");
 
         _tokenIds.increment();
         
@@ -102,11 +106,11 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
     function adminMint(uint256 _nftid) public onlyAuthorized nonReentrant returns (uint256) {
 
-        require(address(packsContract) != address(0), "Packs contract address is invalid");
+        require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
 
         _tokenIds.increment();
-        string memory _uri = ITeazePacks(packsContract).getNFTURI(_nftid);
-        uint256 _packNFTid = ITeazePacks(packsContract).getPackIDbyNFT(_nftid);
+        string memory _uri = ITeazePacks(directory.getPacks()).getNFTURI(_nftid);
+        uint256 _packNFTid = ITeazePacks(directory.getPacks()).getPackIDbyNFT(_nftid);
         
         uint256 newItemId = _tokenIds.current();
         _mint(_msgSender(), newItemId);
@@ -134,23 +138,19 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         return NFTmintedCountID[_id];
     }
 
-
-    function setPacksContract(address _address) public onlyOwner {
-        packsContract = _address;
-    }
-
-    
-    // This will allow to rescue ETH sent by mistake directly to the contract
     function rescueETHFromContract() external onlyOwner {
         address payable _owner = payable(_msgSender());
         _owner.transfer(address(this).balance);
     }
 
-    // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
-    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) external onlyOwner {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
- 
+
+    function changeDirectory(address _directory) external onlyAuthorized {
+        directory = Directory(_directory);
+    }
+
 }
 
