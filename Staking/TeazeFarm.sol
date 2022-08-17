@@ -26,24 +26,33 @@ interface ITeazePacks {
   function getPackTimelimitFarm(uint256 _nftid) external view returns (bool);
 }
 
+interface Directory {
+    function getNFTMarketing() external view returns (address); 
+    function getSBX() external view returns (address);
+    function getLotto() external view returns (address);
+    function getNFT() external view returns (address);
+    function getPacks() external view returns (address);
+    function getCrates() external view returns (address);
+}
+
 // Allows another user(s) to change contract variables
 contract Authorized is Ownable {
 
     mapping(address => bool) public authorized;
 
     modifier onlyAuthorized() {
-        require(authorized[_msgSender()] || owner() == address(_msgSender()), "Sender is not authorized");
+        require(authorized[_msgSender()] || owner() == address(_msgSender()), "E36");
         _;
     }
 
     function addAuthorized(address _toAdd) onlyOwner public {
-        require(_toAdd != address(0), "Address is the zero address");
+        require(_toAdd != address(0), "E37");
         authorized[_toAdd] = true;
     }
 
     function removeAuthorized(address _toRemove) onlyOwner public {
-        require(_toRemove != address(0), "Address is the zero address");
-        require(_toRemove != address(_msgSender()), "Sender cannot remove themself");
+        require(_toRemove != address(0), "E37");
+        require(_toRemove != address(_msgSender()), "E38");
         authorized[_toRemove] = false;
     }
 
@@ -124,23 +133,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     uint256 public simpCardRedeemDiscount = 10;
 
-    address public SimpBuxAddress; //SimpBux contract address
-    address public NFTmarketing = 0xbbd72e76cC3e09227e5Ca6B5bC4355d62061C9e4; //NFT/Marketing address
-    address public lootboxAddress; //lootbox address
-    address public packsContract; //SimpPacks
+    Directory public directory;
+    
     address public simpCardContract;
-    address public teazelotto; //teaze lotto address
-    address public nftContract;
-    address public teazetoken; //teaze token
 
     bool simpCardBonusEnabled = false;
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
     bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
     bool public dynamicStakingActive = true; //whether the staking pool will auto-balance rewards or not.
     
-    
-    IERC20 iteazetoken; 
-
     event Unstake(address indexed user, uint256 indexed pid);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -149,17 +150,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     constructor(
         SimpBux _simpbux,
         uint256 _startBlock,
-        address _teazetoken
+        address _directory
     ) {
-        require(address(_simpbux) != address(0), "SimpBux address is invalid");
+        require(address(_simpbux) != address(0), "E39");
         //require(_startBlock >= block.number, "startBlock is before current block");
-
+        directory = Directory(_directory);
         simpbux = _simpbux;
-        SimpBuxAddress = address(_simpbux);
         startBlock = _startBlock;
-        teazetoken = _teazetoken;
-        iteazetoken = IERC20(teazetoken); 
-
         addAuthorized(owner());
 
     }
@@ -205,10 +202,10 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         IERC20 _lpToken,
         bool _withUpdate
     ) public onlyOwner {
-        require(address(_lpToken) != address(0), "LP token is invalid");
-        require(!addedLpTokens[address(_lpToken)], "LP token is already added");
+        require(address(_lpToken) != address(0), "E40");
+        require(!addedLpTokens[address(_lpToken)], "E41");
 
-        require(_allocPoint >= 1 && _allocPoint <= 100, "_allocPoint is outside of range 1-100");
+        require(_allocPoint >= 1 && _allocPoint <= 100, "E42");
 
         if (_withUpdate) {
             massUpdatePools();
@@ -232,7 +229,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         uint256 _allocPoint,
         bool _withUpdate
     ) public onlyAuthorized {
-        require(_allocPoint >= 1 && _allocPoint <= 100, "_allocPoint is outside of range 1-100");
+        require(_allocPoint >= 1 && _allocPoint <= 100, "E42");
 
         if (_withUpdate) {
             massUpdatePools();
@@ -247,7 +244,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         uint256 _allocPoint,
         bool _withUpdate
     ) internal {
-        require(_allocPoint >= 1 && _allocPoint <= 100, "_allocPoint is outside of range 1-100");
+        require(_allocPoint >= 1 && _allocPoint <= 100, "E42");
 
         if (_withUpdate) {
             updatePool(_pid);
@@ -323,9 +320,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             
             if (_pid != 0) { //$Teaze tokens
                 if(user.amount == 0) { //we only want the minimum to apply on first deposit, not subsequent ones
-                require(_amount >= minTeazeStake, "You cannot stake less than the minimum required $Teaze");
+                require(_amount >= minTeazeStake, "E43");
                 }
-                require(_amount.add(user.amount) <= maxTeazeStake, "You cannot stake more than the maximum $Teaze");
+                require(_amount.add(user.amount) <= maxTeazeStake, "E44");
                 pool.runningTotal = pool.runningTotal.add(_amount);
                 user.amount = user.amount.add(_amount);  
                 pool.lpToken.safeTransferFrom(address(_msgSender()), address(this), _amount);
@@ -333,9 +330,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 
             } else { //LP tokens
                 if(user.amount == 0) { //we only want the minimum to apply on first deposit, not subsequent ones
-                require(_amount >= minLPStake, "You cannot stake less than the minimum LP Tokens");
+                require(_amount >= minLPStake, "E45");
                 }
-                require(_amount.add(user.amount) <= maxLPStake, "You cannot stake more than the maximum LP Tokens");
+                require(_amount.add(user.amount) <= maxLPStake, "E46");
                 pool.runningTotal = pool.runningTotal.add(_amount);
                 user.amount = user.amount.add(_amount);
                 pool.lpToken.safeTransferFrom(address(_msgSender()), address(this), _amount);
@@ -361,14 +358,14 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     function setUnstakeTime(uint256 _time) external onlyAuthorized {
 
-        require(_time >= 0 || _time <= 172800, "Time should be between 0 and 2 days (in seconds)");
+        require(_time >= 0 || _time <= 172800, "E47");
         unstakeTime = _time;
     }
 
     //Call unstake to start countdown
     function unstake(uint256 _pid) public {
         UserInfo storage user = userInfo[_pid][_msgSender()];
-        require(user.amount > 0, "You have no amount to unstake");
+        require(user.amount > 0, "E48");
 
         unstakeTimer[_pid][_msgSender()] = block.timestamp.add(unstakeTime);
         userStaked[_pid][_msgSender()] = false;
@@ -390,9 +387,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_msgSender()];
         uint256 userAmount = user.amount;
-        require(_amount > 0, "Withdrawal amount must be greater than zero");
-        require(user.amount >= _amount, "Withdraw amount is greater than user amount");
-        require(block.timestamp > unstakeTimer[_pid][_msgSender()], "Unstaking wait period has not expired");
+        require(_amount > 0, "E49");
+        require(user.amount >= _amount, "E50");
+        require(block.timestamp > unstakeTimer[_pid][_msgSender()], "E51");
 
         updatePool(_pid);
 
@@ -452,7 +449,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             }
 
         }
-        
                         
     }
 
@@ -465,19 +461,19 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function setBlockRewardUpdateCycle(uint256 _blockRewardUpdateCycle) external onlyAuthorized {
-        require(_blockRewardUpdateCycle > 0, "Value is zero");
+        require(_blockRewardUpdateCycle > 0, "E52");
         blockRewardUpdateCycle = _blockRewardUpdateCycle;
     }
 
     // Just in case an adjustment is needed since mined blocks per day
     // changes constantly depending on the network
     function setBlocksPerDay(uint256 _blocksPerDay) external onlyAuthorized {
-        require(_blocksPerDay >= 1 && _blocksPerDay <= 14000, "Value is outside of range 1-14000");
+        require(_blocksPerDay >= 1 && _blocksPerDay <= 14000, "E53");
         blocksPerDay = _blocksPerDay;
     }
 
     function setBlockRewardPercentage(uint256 _blockRewardPercentage) external onlyAuthorized {
-        require(_blockRewardPercentage >= 1 && _blockRewardPercentage <= 5, "Value is outside of range 1-5");
+        require(_blockRewardPercentage >= 1 && _blockRewardPercentage <= 5, "E54");
         blockRewardPercentage = _blockRewardPercentage;
     }
 
@@ -490,8 +486,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyAuthorized {
        /* so admin can move out any erc20 mistakenly sent to farm contract EXCEPT Teaze & Teaze LP tokens */
-        require(_tokenAddr != address(0xcDC477f2ccFf2d8883067c9F23cf489F2B994d00), "Cannot transfer out LP token");
-        require(_tokenAddr != address(0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C), "Cannot transfer out $Teaze token");
+        //require(_tokenAddr != address(0xcDC477f2ccFf2d8883067c9F23cf489F2B994d00), "Cannot transfer out LP token");
+        //require(_tokenAddr != address(0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C), "Cannot transfer out $Teaze token");
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
 
@@ -574,15 +570,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     //withdraw SimpBux
     function withdrawRewardsOnly() public nonReentrant {
 
-        require(enableRewardWithdraw, "SimpBux withdrawals are not enabled");
+        require(enableRewardWithdraw, "E55");
 
-        IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
+        IERC20 rewardtoken = IERC20(directory.getSBX()); //SimpBux
 
         redeemTotalSBXRewards(_msgSender());
 
         uint256 pending = userBalance[_msgSender()];
         if (pending > 0) {
-            require(rewardtoken.balanceOf(address(this)) > pending, "SimpBux token balance of this contract is insufficient");
+            require(rewardtoken.balanceOf(address(this)) > pending, "E56");
             userBalance[_msgSender()] = 0;
             safeTokenTransfer(_msgSender(), pending);
         }
@@ -590,58 +586,28 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         emit WithdrawRewardsOnly(_msgSender(), pending);
     }
 
-    // Set teazelotto contract address
-     function setNFTContract(address _address) external onlyAuthorized {
-        nftContract = _address;
-    }
-
-    // Set teazelotto contract address
-     function setLottoContract(address _address) external onlyAuthorized {
-        teazelotto = _address;
-    }
-
-    // Set packs contract address
-     function setPacksContract(address _address) external onlyAuthorized {
-        packsContract = _address;
-    }
-
-    // Set SimpBux contract address
-     function setSimpBuxAddress(address _address) external onlyAuthorized {
-        SimpBuxAddress = _address;
-    }
-
-    // Set lootbox address
-     function setlootboxAddress(address _address) external onlyAuthorized {
-        lootboxAddress = _address;
-    }
-
-    // Set NFT contract address
-     function setNFTMarketingAddress(address _address) external onlyAuthorized {
-        NFTmarketing = _address;
-    }
-
     //redeem the NFT with SimpBux only
     function redeem(uint256 _packid, bool _withMintToken) public nonReentrant {
 
-        require(packsContract != address(0), "Packs address invalid");
-        require(ITeazePacks(packsContract).getPackTimelimitFarm(_packid), "Pack has expired");
+        require(directory.getPacks() != address(0), "E57");
+        require(ITeazePacks(directory.getPacks()).getPackTimelimitFarm(_packid), "E58");
 
-        uint256 packMinted = ITeazePacks(packsContract).mintedCountbyID(_packid);
+        uint256 packMinted = ITeazePacks(directory.getPacks()).mintedCountbyID(_packid);
    
-        (,,,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(packsContract).getPackInfo(_packid);
+        (,,,uint256 packMintLimit,bool packRedeemable,) = ITeazePacks(directory.getPacks()).getPackInfo(_packid);
     
-        require(packRedeemable, "This NFT is not redeemable with SimpBux or mint tokens");
-        require(packMinted < packMintLimit, "This NFT has reached its mint limit");
+        require(packRedeemable, "E59");
+        require(packMinted < packMintLimit, "E60");
          
         uint256 price = getSimpCardPackPrice(_packid, _msgSender());
 
-        require(price > 0, "NFT not found");
+        require(price > 0, "E61");
 
         if(_withMintToken) {
 
-            require(mintToken[_msgSender()] > 0, "You have no mint tokens to mint with");
+            require(mintToken[_msgSender()] > 0, "E62");
             mintToken[_msgSender()] = mintToken[_msgSender()] - 1;
-            ITeazePacks(packsContract).premint(_msgSender(), _packid);
+            ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
 
         } else { 
 
@@ -649,15 +615,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
             if (userBalance[_msgSender()] < price) {
             
-                IERC20 rewardtoken = IERC20(SimpBuxAddress); //SimpBux
-                require(rewardtoken.balanceOf(_msgSender()) >= price, "You do not have the required tokens for purchase"); 
-                ITeazePacks(packsContract).premint(_msgSender(), _packid);
+                IERC20 rewardtoken = IERC20(directory.getSBX()); //SimpBux
+                require(rewardtoken.balanceOf(_msgSender()) >= price, "E63"); 
+                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
                 IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
 
             } else {
 
-                require(userBalance[_msgSender()] >= price, "Not enough SimpBux to redeem");
-                ITeazePacks(packsContract).premint(_msgSender(), _packid);
+                require(userBalance[_msgSender()] >= price, "E64");
+                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
                 userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
 
             }
@@ -669,33 +635,33 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // users can also purchase the NFT with $teaze token and the proceeds can be split between nft creation address, lootbox contract, and the lotto pool
     function purchase(uint256 _packid) public payable nonReentrant {
 
-        require(packsContract != address(0), "Packs address invalid");
-        require(ITeazePacks(packsContract).getPackTimelimitFarm(_packid), "Pack has expired");
+        require(directory.getPacks() != address(0), "E57");
+        require(ITeazePacks(directory.getPacks()).getPackTimelimitFarm(_packid), "E58");
 
 
-        (,,,uint256 packMintLimit,, bool packPurchasable) = ITeazePacks(packsContract).getPackInfo(_packid);
+        (,,,uint256 packMintLimit,, bool packPurchasable) = ITeazePacks(directory.getPacks()).getPackInfo(_packid);
         
-        uint256 packMinted = ITeazePacks(packsContract).getPackTotalMints(_packid);
+        uint256 packMinted = ITeazePacks(directory.getPacks()).getPackTotalMints(_packid);
 
         uint256 price = getPackTotalPrice(_msgSender(), _packid);        
 
-        require(packPurchasable, "This NFT is not purchasable with BNB");
-        require(packMinted < packMintLimit, "This NFT Pack has reached its mint limit");
-        require(msg.value == price, "BNB is insufficient for purchase");
+        require(packPurchasable, "E65");
+        require(packMinted < packMintLimit, "E66");
+        require(msg.value == price, "E67");
 
         uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
         uint256 netremainder = msg.value.sub(netamount);
             
-        ITeazePacks(packsContract).premint(_msgSender(), _packid);
-        ITeazePacks(packsContract).packPurchased(_msgSender(),_packid);
+        ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
+        ITeazePacks(directory.getPacks()).packPurchased(_msgSender(),_packid);
 
-        payable(teazelotto).transfer(netamount);
+        payable(directory.getLotto()).transfer(netamount);
         totalEarnedLotto = totalEarnedLotto + netamount;
         
-        payable(NFTmarketing).transfer(netremainder.mul(nftMarketingSplit).div(100));
+        payable(directory.getNFTMarketing()).transfer(netremainder.mul(nftMarketingSplit).div(100));
         totalEarnedNFT = totalEarnedNFT + netremainder.mul(nftMarketingSplit).div(100);
 
-        payable(lootboxAddress).transfer(netremainder.mul(lootboxSplit).div(100));
+        payable(directory.getCrates()).transfer(netremainder.mul(lootboxSplit).div(100));
         totalEarnedLoot = totalEarnedLoot + netremainder.mul(lootboxSplit).div(100);
         
     }
@@ -715,7 +681,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function increaseSBXBalance(address _address, uint256 _amount) external {
-        require(msg.sender == address(teazelotto) || msg.sender == address(packsContract), "Function may only be called by the approved contract");
+        require(msg.sender == address(directory.getLotto()) || msg.sender == address(directory.getPacks()), "E68");
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
@@ -746,8 +712,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Sets min/max staking amounts for Teaze token
     function setTeazeStakingMinMax(uint256 _min, uint256 _max) external onlyAuthorized {
 
-        require(_min < _max, "The maximum staking amount is less than the minimum");
-        require(_min > 0, "The minimum amount cannot be zero");
+        require(_min < _max, "E69");
+        require(_min > 0, "E70");
 
         minTeazeStake = _min;
         maxTeazeStake = _max;
@@ -756,8 +722,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Sets min/max amounts for LP staking
     function setLPStakingMinMax(uint256 _min, uint256 _max) external onlyAuthorized {
 
-        require(_min < _max, "The maximum staking amount is less than the minimum");
-        require(_min > 0, "The minimum amount cannot be zero");
+        require(_min < _max, "E69");
+        require(_min > 0, "E70");
 
         minLPStake = _min;
         maxLPStake = _max;
@@ -766,7 +732,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Lets user move their pending rewards to accrued/escrow balance
     function moveRewardsToEscrow(address _address) external {
 
-        require(_address == _msgSender() || authorized[_msgSender()], "Sender is not wallet owner or authorized");
+        require(_address == _msgSender() || authorized[_msgSender()], "E71");
 
         UserInfo storage user0 = userInfo[0][_msgSender()];
         uint256 userAmount = user0.amount;
@@ -793,16 +759,16 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Sets the allocation multiplier
     function setAllocMultiplier(uint256 _newAllocMul) external onlyAuthorized {
 
-        require(_newAllocMul >= 1 && _newAllocMul <= 100, "_allocPoint is outside of range 1-100");
+        require(_newAllocMul >= 1 && _newAllocMul <= 100, "E42");
 
         allocMultiplier = _newAllocMul;
     }
 
     function setAllocations(uint256 _lpalloc, uint256 _stakealloc) external onlyAuthorized {
 
-        require(_lpalloc >= 1 && _lpalloc <= 100, "lpalloc is outside of range 1-100");
-        require(_stakealloc >= 1 && _stakealloc <= 100, "stakealloc is outside of range 1-100");
-        require(_stakealloc.add(_lpalloc) == 100, "amounts should add up to 100");
+        require(_lpalloc >= 1 && _lpalloc <= 100, "E72");
+        require(_stakealloc >= 1 && _stakealloc <= 100, "E73");
+        require(_stakealloc.add(_lpalloc) == 100, "E74");
 
         lpalloc = _lpalloc;
         stakealloc = _stakealloc;
@@ -825,15 +791,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         uint256 newStakeAlloc;
 
         if (runningTotal0 >= maxLPStake) {
-            lpratio = SafeMath.div(runningTotal0, maxLPStake, "lpratio >= maxLPStake divison error");
+            lpratio = SafeMath.div(runningTotal0, maxLPStake, "E75");
         } else {
-            lpratio = SafeMath.div(maxLPStake, maxLPStake, "lpratio maxLPStake / maxLPStake division error");
+            lpratio = SafeMath.div(maxLPStake, maxLPStake, "E76");
         }
 
         if (runningTotal1 >= maxTeazeStake) {
-             stakeratio = SafeMath.div(runningTotal1, maxTeazeStake, "stakeratio >= maxTeazeStake division error"); 
+             stakeratio = SafeMath.div(runningTotal1, maxTeazeStake, "E77"); 
         } else {
-            stakeratio = SafeMath.div(maxTeazeStake, maxTeazeStake, "stakeratio maxTeazeStake / maxTeazeStake division error");
+            stakeratio = SafeMath.div(maxTeazeStake, maxTeazeStake, "E78");
         }   
 
         multiplier = SafeMath.add(lpratio, stakeratio);
@@ -846,7 +812,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
 
         if (stakeratio > lpratio) {
-            ratio = SafeMath.div(stakeratio, lpratio, "stakeratio > lpratio division error");
+            ratio = SafeMath.div(stakeratio, lpratio, "E79");
             
              ratioMultiplier = ratio.mul(allocMultiplier);
 
@@ -868,7 +834,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
 
         if (lpratio > stakeratio) {
-            ratio = SafeMath.div(lpratio, stakeratio,  "lpratio > stakeratio division error");
+            ratio = SafeMath.div(lpratio, stakeratio,  "E80");
 
             ratioMultiplier = ratio.mul(allocMultiplier);
 
@@ -893,13 +859,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
 
     function updateStakedDiscount(uint256 _stakedDiscount) external onlyAuthorized {
-        require(_stakedDiscount >= 0 && _stakedDiscount <= 50, "staker discount must be between 0 and 50 percent");
+        require(_stakedDiscount >= 0 && _stakedDiscount <= 50, "E81");
         stakedDiscount = _stakedDiscount;
     }
 
     function updateSplits(uint256 _packPurchaseSplit, uint256 _nftMarketingSplit, uint256 _lootboxSplit) external onlyAuthorized {
-        require(_packPurchaseSplit >=0 && _packPurchaseSplit <= 100, "pack BNB split must be between 0 and 100 percent");
-        require(_nftMarketingSplit.add(_lootboxSplit) == 100, "NFT creation and lootbox splits must add up to 100 percent");
+        require(_packPurchaseSplit >=0 && _packPurchaseSplit <= 100, "E82");
+        require(_nftMarketingSplit.add(_lootboxSplit) == 100, "E83");
 
         packPurchaseSplit = _packPurchaseSplit;
         nftMarketingSplit = _nftMarketingSplit;
@@ -913,7 +879,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     function getPackTotalPrice(address _holder, uint _packid) public view returns (uint) {
 
-        uint256 packTotalPrice = ITeazePacks(packsContract).getUserPackPrice(_holder, _packid);
+        uint256 packTotalPrice = ITeazePacks(directory.getPacks()).getUserPackPrice(_holder, _packid);
         if(userStaked[0][_holder] || userStaked[1][_holder]) {
             return packTotalPrice.sub(packTotalPrice.mul(stakedDiscount).div(100));
         } else {
@@ -930,7 +896,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
     
     function getSimpCardPackPrice(uint _packid, address _holder) public view returns (uint) {
-        (,,uint256 packSimpBuxPrice,,,) = ITeazePacks(packsContract).getPackInfo(_packid);
+        (,,uint256 packSimpBuxPrice,,,) = ITeazePacks(directory.getPacks()).getPackInfo(_packid);
         
         if (simpCardBonusEnabled) {
                 if (isSimpCardHolder(_holder)) {
@@ -944,17 +910,25 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function increaseMintToken(address _holder) external {
-        require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
+        require(msg.sender == address(directory.getLotto()) || msg.sender == address(directory.getNFT()) || authorized[_msgSender()], "E84");
         mintToken[_holder] = mintToken[_holder] + 1;
     }
 
     function decreaseMintToken(address _holder) external {
-        require(msg.sender == address(teazelotto) || msg.sender == address(nftContract) || authorized[_msgSender()], "Function may only be called by the approved contract");
+        require(msg.sender == address(directory.getLotto()) || msg.sender == address(directory.getNFT()) || authorized[_msgSender()], "E84");
         if(mintToken[_holder] > 0) {mintToken[_holder] = mintToken[_holder] - 1;}
     }
 
     function getMintTokens(address _holder) public view returns (uint) {
         return mintToken[_holder];
+    }
+
+    function changeSimpCardContract(address _contract) external onlyAuthorized {
+        simpCardContract = _contract;
+    }
+
+    function changeDirectory(address _directory) external onlyOwner {
+        directory = Directory(_directory);
     }
     
 }
