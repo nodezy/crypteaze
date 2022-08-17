@@ -34,21 +34,9 @@ interface ITeazeNFT {
 }
 
 interface Directory {
-    function getNFTMarketing() external view returns (address); 
-    function getDiscount1() external view returns (address);
-    function getDiscount2() external view returns (address);
-    function getDiscount3() external view returns (address);
-    function getTeazeToken() external view returns (address);
-    function getOracle() external view returns (address);
-    function getPair() external view returns (address);
-    function getFarm() external view returns (address);
-    function getSBX() external view returns (address);
-    function getLotto() external view returns (address);
     function getInserter() external view returns (address);
     function getNFT() external view returns (address);
     function getPacks() external view returns (address);
-    function getCrates() external view returns (address);
-    function getMarketplace() external view returns (address);
 }
 
 contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
