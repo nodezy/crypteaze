@@ -113,7 +113,7 @@ interface IWETH {
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
 }
 
-interface Directory {
+interface IDirectory {
     function getDiscount1() external view returns (address);
     function getDiscount2() external view returns (address);
     function getDiscount3() external view returns (address);
@@ -121,6 +121,7 @@ interface Directory {
     function getPair() external view returns (address);
     function getFarm() external view returns (address);
     function getInserter() external view returns (address);
+    function getOracle() external view returns (address);
 }
 
 contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
@@ -152,9 +153,8 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     mapping(uint256 => globalLotteryData) public globallotto; 
     mapping(address => userLotteryData) public userlotto; 
     
-    IOracle public oracle;
     IDEXRouter router;
-    Directory public directory;
+    IDirectory public directory;
 
     address public simpCardContract;
     address lastLottery;
@@ -169,9 +169,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     uint16 simpWheelBaseReward = 25;
     uint16 winningNumber; 
     uint16 public winningRoll = 499; //adjustable roll # so SBX win % can be 50/50 
-    uint16 public spinFrequencyReduction = 3600;
+    uint16 public spinFrequencyReduction = 3600; //3600 for production
     uint16 public mintbonuspercent = 975;
-    uint16 public  discountbonuspercent = 950;
+    uint16 public discountbonuspercent = 950;
+    uint16 public discountBonus = 100;
     uint24 marketBuyGas = 230000;  
     uint24 public spinFrequency = 18000;    //18000 for production
     uint32 public priceCheckInterval = 900;   //900 for production
@@ -185,19 +186,19 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
     bool public simpCardBonusEnabled = false;
     bool public nftbonusenabled = false;
-    bool public discountbonusenabled = false;
-    bool public mintTokenWin = true; //remove for production
+    bool public discountbonusenabled = true;
+    bool public mintTokenWin = false; //remove for production
     bool public discountTokenWin = true; //remove for production
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
     event Jackpot(uint indexed amountBNB, uint indexed winningRoll, address indexed winner);
     event PriceHistory(uint indexed timestamp, uint indexed price);
-    event DiscountTokenSent(bool indexed status);
+    event DiscountTokenSent(bool indexed status, address indexed token, uint indexed bonusSBX);
     event MintTokenAdded(bool indexed status);
 
     constructor(address _directory, address _router, address _lastlottery, uint16 _seed) {
-       directory = Directory(_directory);
+       directory = IDirectory(_directory);
        authorized[owner()] = true;
        randNonce = Inserter(directory.getInserter()).getNonce();
        Inserter(directory.getInserter()).makeActive();
@@ -237,9 +238,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         User.totalSpins++;
                 
-        bool staked = ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender());
-
-       // require(staked, "User must be staked to spin the SimpWheel of Fortune");  //uncomment for production
+       //require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "User must be staked to spin the SimpWheel of Fortune");  //uncomment for production
     
         if(!_override) {
             if(User.lastSpinTime != 0) {
@@ -257,7 +256,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
         } else {
             uint overrideSpinFee = (uint256(User.totalSpins).sub(User.lastDailySpin)).mul(overrideFee);
-            require(msg.value >= (oracle.getbnbusdequivalent(overrideSpinFee)).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
+            require(msg.value >= (IOracle(directory.getOracle()).getbnbusdequivalent(overrideSpinFee)).mul(99).div(100), "Please include the spin fee to spin the SimpWheel");
         }
 
         uint16 roll;
@@ -273,6 +272,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         payable(this).transfer(msg.value);
 
         if(roll != winningNumber && !adminWinner) {
+
+            if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
+                    saveLatestPrice();
+            }
 
             if (roll > winningRoll) { //winning of some kind
 
@@ -293,20 +296,16 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                 User.totalSBX += uint32(userReward);
                 Lotto.globalSBX += uint32(userReward);
 
-                
-                if(staked) { //remove if(staked) {} for production, leave function
-                    ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
-                }
-
                 if(nftbonusenabled) {
-                    if(roll >= mintbonuspercent || mintTokenWin) {
-                        ITeazeFarm(directory.getFarm()).increaseMintToken(_msgSender());
+                    if(mintTokenWin) {roll = 975;} //remove for production
+                    if(roll >= mintbonuspercent) {
+                         ITeazeFarm(directory.getFarm()).increaseMintToken(_msgSender());
                     }
                 }
 
                 if(discountbonusenabled) {
-                    if(roll >= discountbonuspercent || discountTokenWin) {
-
+                    if(discountTokenWin && !mintTokenWin){roll = 950;} //remove for production
+                    if(roll >= discountbonuspercent) {
                         address[] memory discountArray = new address[](3);
                         discountArray[0] = directory.getDiscount1();
                         discountArray[1] = directory.getDiscount2();
@@ -318,21 +317,17 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
                         require(IERC20(discountArray[discountRoll]).balanceOf(address(this)) > 0, "Discount token balance of this contract is insufficient");
                         if(IERC20(discountArray[discountRoll]).balanceOf(_msgSender()) == 0) {
                             IERC20(discountArray[discountRoll]).transfer(_msgSender(), 1000000000); //DiscountToken
-                            emit DiscountTokenSent(true);
+                            emit DiscountTokenSent(true, discountArray[discountRoll], 0);
                         } else {
-                            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), 100000000000); //give 100 SBX bonus if discount is already held
-                            emit DiscountTokenSent(false);
+                            userReward += discountBonus; //give 100 SBX bonus if discount is already held
+                            emit DiscountTokenSent(false, discountArray[discountRoll], discountBonus);
                         }
                         
                     }
                 }
 
+                ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), userReward.mul(1000000000)); //add 9 zeros
 
-                if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
-                    saveLatestPrice();
-                }
-
-                    
             }  else {
 
                 if(address(this).balance > jackpotLimit) {
@@ -343,13 +338,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
                     jackpotLimit = uint128(uint(jackpotLimit).add(uint(jackpotLimit).mul(overage).div(100)));
                     
-
-                } else {
-
-                    if (block.timestamp > uint(LastPriceTime).add(priceCheckInterval)) {
-                        saveLatestPrice();
-                    }
-                }
+                } 
                 
             }
 
@@ -504,15 +493,11 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         return winningNumber;
     }
 
-    function changeOracle(address _oracle) external onlyAuthorized {
-        oracle = IOracle(_oracle);
-    }
-
     function saveLatestPrice() internal {
 
         LastPriceTime = block.timestamp;
 
-        (,,uint lastPrice) = oracle.getTeazeUSDPrice();
+        (,,uint lastPrice) = IOracle(directory.getOracle()).getTeazeUSDPrice();
         
         emit PriceHistory(LastPriceTime, lastPrice);
     }
@@ -522,7 +507,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     }
 
     function returnFeeReduction(uint _amount, uint _reduction) public view returns (uint) {
-        return (oracle.getbnbusdequivalent(_amount).div(_reduction));
+        return (IOracle(directory.getOracle()).getbnbusdequivalent(_amount).div(_reduction));
     }
 
     function changePriceCheckInterval(uint32 _priceCheckInterval) external onlyAuthorized {
@@ -575,8 +560,22 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         LottoStackTooDeep.globalJackpotsBNB) = LastLotto(lastLottery).globallotto(0);
     }
 
+    function changeBonusLevels(uint16 _mintbonuslvl, uint16 _discountbonuslvl) external onlyAuthorized {
+        mintbonuspercent = _mintbonuslvl;
+        discountbonuspercent = _discountbonuslvl;
+    }
+
+    function changeDiscountBonus(uint16 _bonusSBX) external onlyAuthorized {
+        discountBonus = _bonusSBX;
+    }
+
+    function setTokenWins(bool _minttokenwin, bool _discounttokenwin) external onlyAuthorized {
+        mintTokenWin = _minttokenwin;
+        discountTokenWin = _discounttokenwin;
+    }
+
     function changeDirectory(address _directory) external onlyAuthorized {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
     }
 
 }
