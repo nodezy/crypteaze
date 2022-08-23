@@ -185,10 +185,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
     
     bool public adminWinner = false; //to test winning jackpot roll, remove for production
     bool public simpCardBonusEnabled = false;
-    bool public nftbonusenabled = false;
+    bool public nftbonusenabled = true;
     bool public discountbonusenabled = true;
     bool public mintTokenWin = false; //remove for production
-    bool public discountTokenWin = true; //remove for production
+    bool public discountTokenWin = false; //remove for production
     
     event SpinResult(uint indexed roll, uint indexed userReward, bool indexed jackpotWinner, uint jackpotamount);
     event TeazeBuy(uint indexed amountBNB, uint indexed amountTeaze);
@@ -305,7 +305,7 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
 
                 if(discountbonusenabled) {
                     if(discountTokenWin && !mintTokenWin){roll = 950;} //remove for production
-                    if(roll >= discountbonuspercent) {
+                    if(roll >= discountbonuspercent && roll < mintbonuspercent) {
                         address[] memory discountArray = new address[](3);
                         discountArray[0] = directory.getDiscount1();
                         discountArray[1] = directory.getDiscount2();
