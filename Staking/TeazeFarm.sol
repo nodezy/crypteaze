@@ -26,7 +26,7 @@ interface ITeazePacks {
   function getPackTimelimitFarm(uint256 _nftid) external view returns (bool);
 }
 
-interface Directory {
+interface IDirectory {
     function getNFTMarketing() external view returns (address); 
     function getSBX() external view returns (address);
     function getLotto() external view returns (address);
@@ -133,7 +133,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     uint256 public simpCardRedeemDiscount = 10;
 
-    Directory public directory;
+    IDirectory public directory;
     
     address public simpCardContract;
 
@@ -154,7 +154,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     ) {
         require(address(_simpbux) != address(0), "E39");
         //require(_startBlock >= block.number, "startBlock is before current block");
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
         simpbux = _simpbux;
         startBlock = _startBlock;
         addAuthorized(owner());
@@ -389,8 +389,10 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         uint256 userAmount = user.amount;
         require(_amount > 0, "E49");
         require(user.amount >= _amount, "E50");
-        require(block.timestamp > unstakeTimer[_pid][_msgSender()], "E51");
-
+        if (unstakeTime != 0) {
+            require(block.timestamp > unstakeTimer[_pid][_msgSender()], "E51");
+        }
+        
         updatePool(_pid);
 
         if (_amount > 0) {
@@ -928,7 +930,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function changeDirectory(address _directory) external onlyOwner {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
     }
     
 }
