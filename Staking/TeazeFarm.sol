@@ -389,69 +389,72 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_msgSender()];
         uint256 userAmount = user.amount;
-        uint256 unstakerFee;
+        uint256 unstakerFee = 0;
         uint256 totalPercent = 100;
         uint finalAmount = 0;
         uint teazeamount = _amount;
         uint lpamount = _amount;
         require(_amount > 0, "E49");
-        require(user.amount >= _amount, "E50");
-        if (unstakeTime == 0) {
-            unstakerFee = unstakeFee;
-        } else {
+        require(user.amount >= _amount, "E50");     
 
-            if (block.timestamp > unstakeTimer[_pid][_msgSender()]) {
-                unstakerFee = noWaitFee;
-            } else {
-                unstakerFee = unstakeFee;
-            }
+        updatePool(_pid);        
 
-        }
+            if (_pid == 0) { //LP Tokens
 
-        updatePool(_pid);
+                 if (unstakeTime == 0) {
 
-        
-
-            if (_pid != 0) { //$Teaze tokens
-                
-                uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
-                uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
-                /*if (totalRewards == 0) { //no rewards, just return 100% to the user
-
-                    uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
-                    userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
-
-                    pool.runningTotal = pool.runningTotal.sub(_amount);
-                    pool.lpToken.safeTransfer(address(_msgSender()), _amount);
-                    user.amount = user.amount.sub(_amount);
-                    emit Withdraw(_msgSender(), _pid, _amount);
+                    unstakerFee = 0;
                     
-                } */
-                //if (totalRewards > 0) { //include reflection
+                } else {
 
-                    uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
-                    userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
+                    if (block.timestamp < unstakeTimer[_pid][_msgSender()]) {
 
-                    uint256 percentRewards = teazeamount.mul(100).div(pool.runningTotal); //get % of share out of 100
-                    uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
+                        unstakerFee = unstakeFee;
+                    }
+
+                }
                 
-                    pool.runningTotal = pool.runningTotal.sub(teazeamount);
-                    user.amount = user.amount.sub(teazeamount);
-                    finalAmount = teazeamount.mul(totalPercent.sub(unstakerFee)).div(100).add(reflectAmount);
-                    pool.lpToken.safeTransfer(address(_msgSender()), finalAmount);
-                    emit Withdraw(_msgSender(), _pid, finalAmount);
-                //}               
-
-            } else {
-
-
                 uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                 
                 userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
-                user.amount = user.amount.sub(lpamount);
+                
                 pool.runningTotal = pool.runningTotal.sub(lpamount);
-                pool.lpToken.safeTransfer(address(_msgSender()), lpamount);
+                user.amount = user.amount.sub(lpamount);
+                finalAmount = lpamount.mul(totalPercent.sub(unstakerFee)).div(100);
+                pool.lpToken.safeTransfer(address(_msgSender()), finalAmount);
                 emit Withdraw(_msgSender(), _pid, lpamount);
+
+            } else { //Teaze tokens
+ 
+                if (unstakeTime == 0) {
+
+                    unstakerFee = unstakeFee;
+                    
+                } else {
+
+                    if (block.timestamp > unstakeTimer[_pid][_msgSender()]) {
+                        unstakerFee = noWaitFee;
+                    } else {
+                        unstakerFee = unstakeFee;
+                    }
+
+                }
+
+                uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
+                uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
+
+                uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
+                userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
+
+                uint256 percentRewards = teazeamount.mul(100).div(pool.runningTotal); //get % of share out of 100
+                uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
+            
+                pool.runningTotal = pool.runningTotal.sub(teazeamount);
+                user.amount = user.amount.sub(teazeamount);
+                finalAmount = teazeamount.mul(totalPercent.sub(unstakerFee)).div(100).add(reflectAmount);
+                pool.lpToken.safeTransfer(address(_msgSender()), finalAmount);
+                emit Withdraw(_msgSender(), _pid, finalAmount);
+
             }
             
 
