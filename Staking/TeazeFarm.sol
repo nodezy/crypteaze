@@ -108,6 +108,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
     uint256 public blocksPerDay = 2500; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
     uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
+    uint256 public unstakeFee = 1; //The percentage of Teaze tokens taken from staker at withdraw
+    uint256 public noWaitFee = 2; //The percentage of Teaze tokens taken if staker doesn't want to wait for unstakeTime;
     uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
     
@@ -381,27 +383,40 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         }
     }
 
-    // Withdraw LP tokens from TeazeFarmi
+    // Withdraw tokens from TeazeFarm
     function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
 
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_msgSender()];
         uint256 userAmount = user.amount;
+        uint256 unstakerFee;
+        uint256 totalPercent = 100;
+        uint finalAmount = 0;
+        uint teazeamount = _amount;
+        uint lpamount = _amount;
         require(_amount > 0, "E49");
         require(user.amount >= _amount, "E50");
-        if (unstakeTime != 0) {
-            require(block.timestamp > unstakeTimer[_pid][_msgSender()], "E51");
+        if (unstakeTime == 0) {
+            unstakerFee = unstakeFee;
+        } else {
+
+            if (block.timestamp > unstakeTimer[_pid][_msgSender()]) {
+                unstakerFee = noWaitFee;
+            } else {
+                unstakerFee = unstakeFee;
+            }
+
         }
-        
+
         updatePool(_pid);
 
-        if (_amount > 0) {
+        
 
             if (_pid != 0) { //$Teaze tokens
                 
                 uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
                 uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
-                if (totalRewards == 0) { //no rewards, just return 100% to the user
+                /*if (totalRewards == 0) { //no rewards, just return 100% to the user
 
                     uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                     userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
@@ -411,21 +426,21 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                     user.amount = user.amount.sub(_amount);
                     emit Withdraw(_msgSender(), _pid, _amount);
                     
-                } 
-                if (totalRewards > 0) { //include reflection
+                } */
+                //if (totalRewards > 0) { //include reflection
 
                     uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                     userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
 
-                    uint256 percentRewards = _amount.mul(100).div(pool.runningTotal); //get % of share out of 100
+                    uint256 percentRewards = teazeamount.mul(100).div(pool.runningTotal); //get % of share out of 100
                     uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
-
-                    pool.runningTotal = pool.runningTotal.sub(_amount);
-                    user.amount = user.amount.sub(_amount);
-                    _amount = _amount.mul(99).div(100).add(reflectAmount);
-                    pool.lpToken.safeTransfer(address(_msgSender()), _amount);
-                    emit Withdraw(_msgSender(), _pid, _amount);
-                }               
+                
+                    pool.runningTotal = pool.runningTotal.sub(teazeamount);
+                    user.amount = user.amount.sub(teazeamount);
+                    finalAmount = teazeamount.mul(totalPercent.sub(unstakerFee)).div(100).add(reflectAmount);
+                    pool.lpToken.safeTransfer(address(_msgSender()), finalAmount);
+                    emit Withdraw(_msgSender(), _pid, finalAmount);
+                //}               
 
             } else {
 
@@ -433,10 +448,10 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
                 
                 userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
-                user.amount = user.amount.sub(_amount);
-                pool.runningTotal = pool.runningTotal.sub(_amount);
-                pool.lpToken.safeTransfer(address(_msgSender()), _amount);
-                emit Withdraw(_msgSender(), _pid, _amount);
+                user.amount = user.amount.sub(lpamount);
+                pool.runningTotal = pool.runningTotal.sub(lpamount);
+                pool.lpToken.safeTransfer(address(_msgSender()), lpamount);
+                emit Withdraw(_msgSender(), _pid, lpamount);
             }
             
 
@@ -450,7 +465,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
             }
 
-        }
+        
                         
     }
 
