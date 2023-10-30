@@ -210,8 +210,11 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
             : IDEXRouter(0x10ED43C718714eb63d5aA57B78B54704E256024E); //0xCc7aDc94F3D80127849D2b41b6439b7CF1eB4Ae0 pcs test router
         WETH = router.WETH();
 
-        updateGlobalLotteryNumbers();
-        updateGlobalJackpotData();
+        if(lastLottery != address(0)) {
+            updateGlobalLotteryNumbers();
+            updateGlobalJackpotData();
+        }
+        
     }
     
     receive() external payable {}
@@ -227,8 +230,10 @@ contract TeazeLotto is Ownable, Authorized, ReentrancyGuard {
         userLotteryData storage User = userlotto[_msgSender()];
 
         if(User.lastDailySpin == 0) {
-            updateUserNumbers(_msgSender());
-            updateUserJackpotData(_msgSender());
+            if(lastLottery != address(0)) {
+                updateUserNumbers(_msgSender());
+                updateUserJackpotData(_msgSender());
+            }
             User.lastSpinTime = 0;
         }
         
