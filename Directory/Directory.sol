@@ -30,7 +30,7 @@ contract Authorizable is Ownable {
 
 contract Directory is Ownable, Authorizable {
 
-    address public getgetNFTMarketing; 
+    address public getNFTMarketing; 
     address public getDiscount1;
     address public getDiscount2;
     address public getDiscount3;
@@ -61,7 +61,7 @@ contract Directory is Ownable, Authorizable {
         address a8
     ) 
     external onlyAuthorized {
-        getgetNFTMarketing = a1; 
+        getNFTMarketing = a1; 
         getDiscount1 = a2;
         getDiscount2 = a3;
         getDiscount3 = a4;
