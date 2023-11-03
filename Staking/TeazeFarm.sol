@@ -106,27 +106,27 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
-    uint256 public blocksPerDay = 2500; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
-    uint256 public blockRewardPercentage = 10; // The percentage used for teazePerBlock calculation.
+    uint256 public blocksPerDay = 28800; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
+    uint256 public blockRewardPercentage = 1; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeFee = 1; //The percentage of Teaze tokens taken from staker at withdraw
     uint256 public noWaitFee = 2; //The percentage of Teaze tokens taken if staker doesn't want to wait for unstakeTime;
-    uint256 public unstakeTime = 86400; // Time in seconds to wait for withdrawal default (86400).
+    uint256 public unstakeTime = 0; //86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
+    uint256 public stakeReward = 100000000000000000; //starting basis for stakeReward (default 10M).
     
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
     uint256 public minLPStake = 250000000000000000; //min lp stake amount (default .25 LP tokens).
-    uint256 public maxLPStake = 210000000000000000000; //max lp stake amount (default 210 LP tokens).
+    uint256 public maxLPStake = 21000000000000000000; //max lp stake amount (default 21 LP tokens).
     uint256 public promoAmount = 200000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
     uint256 public stakedDiscount = 30; //amount the price of a pack mint is discounted if the user is staked (default 30%). 
-    uint256 public packPurchaseSplit = 50; //amount of split between stakepool and nft creation wallet/lootbox wallets. Higher value = higher buyback sent to stakepool (default 50%).
-    uint256 public nftMarketingSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
-    uint256 public lootboxSplit = 50; //amount of split between nft creation wallet and lootbotx wallet (default 50%).
+    uint256 public lottoSplit = 50; //amount of split to lotto (default 50%).
+    uint256 public lootboxSplit = 50; //amount of split to lootbotx wallet (default 50%).
     
     uint256 public rewardSegment = poolReward.mul(100).div(200); //reward segment for dynamic staking.
     uint256 public ratio; //ratio of pool0 to pool1 for dynamic staking.
-    uint256 public lpalloc = 65; //starting pool allocation for LP side.
-    uint256 public stakealloc = 35; //starting pool allocation for Teaze side.
+    uint256 public lpalloc = 50; //starting pool allocation for LP side.
+    uint256 public stakealloc = 50; //starting pool allocation for Teaze side.
     uint256 public allocMultiplier = 5; //ratio * allocMultiplier to balance out the pools.
 
     uint256 public totalEarnedLoot; //Total amount of BNB sent for lootbox creation.
@@ -141,8 +141,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     bool simpCardBonusEnabled = false;
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
-    bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
-    bool public dynamicStakingActive = true; //whether the staking pool will auto-balance rewards or not.
+    bool public promoActive = false; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
+    bool public dynamicStakingActive = false; //whether the staking pool will auto-balance rewards or not.
     
     event Unstake(address indexed user, uint256 indexed pid);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
@@ -260,14 +260,31 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accTeazePerShare = pool.accTeazePerShare;
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = stakeReward;
+        //uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = block.number.sub(pool.lastRewardBlock);
             (uint256 blockReward, ) = getTeazePerBlock();
             uint256 teazeReward = multiplier.mul(blockReward).mul(pool.allocPoint).div(totalAllocPoint);
             accTeazePerShare = accTeazePerShare.add(teazeReward.mul(1e12).div(lpSupply));
         }
-        return user.amount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt);
+
+        uint256 userbonus = 100;
+        uint256 result = user.amount.mul(100).div(maxLPStake.div(2));
+        userbonus = userbonus.sub(result);
+        userbonus = userbonus.mul(11).div(100);
+
+        if(userbonus == 0) {
+            userbonus = 1;
+        } 
+
+        if(_pid == 0) {
+            return (((user.amount.div(10)).mul(2)).mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+        } else {
+            return (user.amount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+        }
+        
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -286,7 +303,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             return;
         }
 
-        uint256 lpSupply = pool.runningTotal; 
+        //uint256 lpSupply = pool.runningTotal; 
+        uint256 lpSupply = stakeReward;
         if (lpSupply == 0) {
             pool.lastRewardBlock = block.number;
             return;
@@ -344,7 +362,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             userStaked[_pid][_msgSender()] = true;
 
             if (!promoWallet[_msgSender()] && promoActive) {
-                userBalance[_msgSender()] = promoAmount; //give 200 promo SimpBux
+                userBalance[_msgSender()] = userBalance[_msgSender()].add(promoAmount); //give 200 promo SimpBux
                 promoWallet[_msgSender()] = true;
             }
 
@@ -352,7 +370,11 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 updateVariablePoolReward();
             }
             
-            user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12);
+            if(_pid == 0) {
+                user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+            } else {
+                user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
+            }
             emit Deposit(_msgSender(), _pid, _amount);
 
         }
@@ -371,6 +393,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
         unstakeTimer[_pid][_msgSender()] = block.timestamp.add(unstakeTime);
         userStaked[_pid][_msgSender()] = false;
+
+        uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
+        userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
     }
 
     //Get time remaining until able to withdraw tokens
@@ -414,10 +439,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
                 }
                 
-                uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
-                
-                userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
-                
                 pool.runningTotal = pool.runningTotal.sub(lpamount);
                 user.amount = user.amount.sub(lpamount);
                 finalAmount = lpamount.mul(totalPercent.sub(unstakerFee)).div(100);
@@ -443,9 +464,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
                 uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
 
-                uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
-                userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
-
                 uint256 percentRewards = teazeamount.mul(100).div(pool.runningTotal); //get % of share out of 100
                 uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
             
@@ -465,7 +483,11 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             if (userAmount == _amount) { //user is retrieving entire balance, set rewardDebt to zero
                 user.rewardDebt = 0;
             } else {
-                user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
+                if(_pid == 0) {
+                    user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+                } else {
+                    user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
+                }
             }
 
         
@@ -488,12 +510,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // Just in case an adjustment is needed since mined blocks per day
     // changes constantly depending on the network
     function setBlocksPerDay(uint256 _blocksPerDay) external onlyAuthorized {
-        require(_blocksPerDay >= 1 && _blocksPerDay <= 14000, "E53");
+        require(_blocksPerDay >= 1 && _blocksPerDay <= 28800, "E53");
         blocksPerDay = _blocksPerDay;
     }
 
     function setBlockRewardPercentage(uint256 _blockRewardPercentage) external onlyAuthorized {
-        require(_blockRewardPercentage >= 1 && _blockRewardPercentage <= 5, "E54");
+        require(_blockRewardPercentage >= 1 && _blockRewardPercentage <= 100, "E54");
         blockRewardPercentage = _blockRewardPercentage;
     }
 
@@ -561,7 +583,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         
         userBalance[_user] = userBalance[_user].add(value0);
 
-        user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
+        user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
 
         uint256 pool1 = 1; 
         
@@ -668,21 +690,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         require(packPurchasable, "E65");
         require(packMinted < packMintLimit, "E66");
         require(msg.value == price, "E67");
-
-        uint256 netamount = msg.value.mul(packPurchaseSplit).div(100);
-        uint256 netremainder = msg.value.sub(netamount);
             
         ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
         ITeazePacks(directory.getPacks()).packPurchased(_msgSender(),_packid);
 
-        payable(directory.getLotto()).transfer(netamount);
-        totalEarnedLotto = totalEarnedLotto + netamount;
-        
-        payable(directory.getNFTMarketing()).transfer(netremainder.mul(nftMarketingSplit).div(100));
-        totalEarnedNFT = totalEarnedNFT + netremainder.mul(nftMarketingSplit).div(100);
+        payable(directory.getLotto()).transfer(msg.value.mul(lottoSplit).div(100));
+        totalEarnedLotto = totalEarnedLotto + msg.value.mul(lottoSplit).div(100);
 
-        payable(directory.getCrates()).transfer(netremainder.mul(lootboxSplit).div(100));
-        totalEarnedLoot = totalEarnedLoot + netremainder.mul(lootboxSplit).div(100);
+        payable(directory.getCrates()).transfer(msg.value.mul(lootboxSplit).div(100));
+        totalEarnedLoot = totalEarnedLoot + msg.value.mul(lootboxSplit).div(100);
         
     }
 
@@ -877,18 +893,20 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     }
 
+    function updateStakeReward(uint256 _stakeReward) external onlyAuthorized {
+        stakeReward = _stakeReward;
+    }
 
     function updateStakedDiscount(uint256 _stakedDiscount) external onlyAuthorized {
         require(_stakedDiscount >= 0 && _stakedDiscount <= 50, "E81");
         stakedDiscount = _stakedDiscount;
     }
 
-    function updateSplits(uint256 _packPurchaseSplit, uint256 _nftMarketingSplit, uint256 _lootboxSplit) external onlyAuthorized {
-        require(_packPurchaseSplit >=0 && _packPurchaseSplit <= 100, "E82");
-        require(_nftMarketingSplit.add(_lootboxSplit) == 100, "E83");
+    function updateSplits(uint256 _lottoSplit, uint256 _lootboxSplit) external onlyAuthorized {
+        require(_lottoSplit >=0 && _lottoSplit <= 100, "E82");
+        require(_lottoSplit.add(_lootboxSplit) == 100, "E83");
 
-        packPurchaseSplit = _packPurchaseSplit;
-        nftMarketingSplit = _nftMarketingSplit;
+        lottoSplit = _lottoSplit;
         lootboxSplit = _lootboxSplit;
 
     }
