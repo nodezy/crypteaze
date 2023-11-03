@@ -107,12 +107,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
     uint256 public blocksPerDay = 28800; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
-    uint256 public blockRewardPercentage = 1; // The percentage used for teazePerBlock calculation.
+    uint256 public blockRewardPercentage = 5; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeFee = 1; //The percentage of Teaze tokens taken from staker at withdraw
     uint256 public noWaitFee = 2; //The percentage of Teaze tokens taken if staker doesn't want to wait for unstakeTime;
     uint256 public unstakeTime = 0; //86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
-    uint256 public stakeReward = 100000000000000000; //starting basis for stakeReward (default 10M).
+    uint256 public stakeReward = 50000000000000000; //starting basis for stakeReward (default 5M).
     
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
@@ -257,34 +257,40 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     // View function to see pending SimpBux tokens on frontend.
     function pendingSBXRewards(uint256 _pid, address _user) public view returns (uint256) {
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][_user];
-        uint256 accTeazePerShare = pool.accTeazePerShare;
-        uint256 lpSupply = stakeReward;
-        //uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        
-        if (block.number > pool.lastRewardBlock && lpSupply != 0) {
-            uint256 multiplier = block.number.sub(pool.lastRewardBlock);
-            (uint256 blockReward, ) = getTeazePerBlock();
-            uint256 teazeReward = multiplier.mul(blockReward).mul(pool.allocPoint).div(totalAllocPoint);
-            accTeazePerShare = accTeazePerShare.add(teazeReward.mul(1e12).div(lpSupply));
-        }
+        if(userStaked[_pid][_user]) {
+            
+            PoolInfo storage pool = poolInfo[_pid];
+            UserInfo storage user = userInfo[_pid][_user];
+            uint256 accTeazePerShare = pool.accTeazePerShare;
+            uint256 lpSupply = stakeReward;
+            //uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+            
+            if (block.number > pool.lastRewardBlock && lpSupply != 0) {
+                uint256 multiplier = block.number.sub(pool.lastRewardBlock);
+                (uint256 blockReward, ) = getTeazePerBlock();
+                uint256 teazeReward = multiplier.mul(blockReward).mul(pool.allocPoint).div(totalAllocPoint);
+                accTeazePerShare = accTeazePerShare.add(teazeReward.mul(1e12).div(lpSupply));
+            }
 
-        uint256 userbonus = 100;
-        uint256 result = user.amount.mul(100).div(maxLPStake.div(2));
-        userbonus = userbonus.sub(result);
-        userbonus = userbonus.mul(11).div(100);
+            uint256 userbonus = 100;
+            uint256 result = user.amount.mul(100).div(maxLPStake.div(2));
+            userbonus = userbonus.sub(result);
+            userbonus = userbonus.mul(11).div(100);
 
-        if(userbonus == 0) {
-            userbonus = 1;
-        } 
+            if(userbonus == 0) {
+                userbonus = 1;
+            } 
 
-        if(_pid == 0) {
-            return (((user.amount.div(10)).mul(2)).mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+            if(_pid == 0) {
+                return (((user.amount.div(10)).mul(2)).mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+            } else {
+                return (user.amount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+            }
+
         } else {
-            return (user.amount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+            return 0;
         }
-        
+                
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
