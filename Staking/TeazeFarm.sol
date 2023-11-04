@@ -106,13 +106,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
-    uint256 public blocksPerDay = 28800; // The estimated number of mined blocks per day, lowered so rewards are halved to start.
+    uint256 public blocksPerDay = 14400; // The estimated number of mined blocks per day
     uint256 public blockRewardPercentage = 5; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeFee = 1; //The percentage of Teaze tokens taken from staker at withdraw
     uint256 public noWaitFee = 2; //The percentage of Teaze tokens taken if staker doesn't want to wait for unstakeTime;
     uint256 public unstakeTime = 0; //86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
-    uint256 public stakeReward = 50000000000000000; //starting basis for stakeReward (default 5M).
+    uint256 public stakeReward = 5000000000000000; //starting basis for stakeReward (default 500k).
     
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
@@ -258,11 +258,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     // View function to see pending SimpBux tokens on frontend.
     function pendingSBXRewards(uint256 _pid, address _user) public view returns (uint256) {
         if(userStaked[_pid][_user]) {
-            
+
             PoolInfo storage pool = poolInfo[_pid];
             UserInfo storage user = userInfo[_pid][_user];
             uint256 accTeazePerShare = pool.accTeazePerShare;
             uint256 lpSupply = stakeReward;
+            uint256 useramount = user.amount;
             //uint256 lpSupply = pool.lpToken.balanceOf(address(this));
             
             if (block.number > pool.lastRewardBlock && lpSupply != 0) {
@@ -272,19 +273,26 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 accTeazePerShare = accTeazePerShare.add(teazeReward.mul(1e12).div(lpSupply));
             }
 
-            uint256 userbonus = 100;
-            uint256 result = user.amount.mul(100).div(maxLPStake.div(2));
-            userbonus = userbonus.sub(result);
-            userbonus = userbonus.mul(11).div(100);
-
-            if(userbonus == 0) {
-                userbonus = 1;
-            } 
+            uint256 userbonus = 100;   
 
             if(_pid == 0) {
-                return (((user.amount.div(10)).mul(2)).mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+                uint256 result = useramount.mul(100).div(maxLPStake.div(2));
+                if(result > 90) {
+                    userbonus = 1;
+                } else {
+                    userbonus = userbonus.sub(result);
+                    userbonus = userbonus.mul(11).div(100);
+                }
+                return (useramount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus).mul(2).div(10);
             } else {
-                return (user.amount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
+                uint256 result = useramount.mul(100).div(maxTeazeStake.div(2));
+                if(result > 90) {
+                    userbonus = 1;
+                } else {
+                    userbonus = userbonus.sub(result);
+                    userbonus = userbonus.mul(11).div(100);
+                }
+                return (useramount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus);
             }
 
         } else {
@@ -376,11 +384,11 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 updateVariablePoolReward();
             }
             
-            if(_pid == 0) {
-                user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
-            } else {
+            //if(_pid == 0) {
+             //   user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+            //} else {
                 user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
-            }
+            //}
             emit Deposit(_msgSender(), _pid, _amount);
 
         }
@@ -397,11 +405,12 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][_msgSender()];
         require(user.amount > 0, "E48");
 
+        uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
+        userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
+
         unstakeTimer[_pid][_msgSender()] = block.timestamp.add(unstakeTime);
         userStaked[_pid][_msgSender()] = false;
 
-        uint256 tempRewards = pendingSBXRewards(_pid, _msgSender());
-        userBalance[_msgSender()] = userBalance[_msgSender()].add(tempRewards);
     }
 
     //Get time remaining until able to withdraw tokens
@@ -489,11 +498,11 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             if (userAmount == _amount) { //user is retrieving entire balance, set rewardDebt to zero
                 user.rewardDebt = 0;
             } else {
-                if(_pid == 0) {
-                    user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
-                } else {
+              //  if(_pid == 0) {
+              //     user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+              //  } else {
                     user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
-                }
+              //  }
             }
 
         
@@ -589,7 +598,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         
         userBalance[_user] = userBalance[_user].add(value0);
 
-        user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+        //user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
+        user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
 
         uint256 pool1 = 1; 
         
@@ -734,21 +744,30 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         UserInfo storage user = userInfo[1][_address];
 
         uint256 _amount = user.amount;
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
-        uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
+
+        if(_amount > 0) {
+
+            return 0;
+
+        } else {
+
+            uint256 lpSupply = pool.lpToken.balanceOf(address(this)); //get total amount of tokens
+            uint256 totalRewards = lpSupply.sub(pool.runningTotal); //get difference between contract address amount and ledger amount
         
-         if (totalRewards > 0) { //include reflection
-            uint256 percentRewards = _amount.mul(100).div(pool.runningTotal); //get % of share out of 100
-            uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
+            if (totalRewards > 0) { //include reflection
+                uint256 percentRewards = _amount.mul(100).div(pool.runningTotal); //get % of share out of 100
+                uint256 reflectAmount = percentRewards.mul(totalRewards).div(100); //get % of reflect amount
 
-            return _amount.add(reflectAmount); //add pool rewards to users original staked amount
+                return _amount.add(reflectAmount); //add pool rewards to users original staked amount
 
-         } else {
+            } else {
 
-             return 0;
+                return 0;
 
-         }
-
+            }
+            
+        }
+ 
     }
 
     // Sets min/max staking amounts for Teaze token
