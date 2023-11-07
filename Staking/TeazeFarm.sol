@@ -106,13 +106,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     uint256 public blockRewardUpdateCycle = 1 days; // The cycle in which the teazePerBlock gets updated.
     uint256 public blockRewardLastUpdateTime = block.timestamp; // The timestamp when the block teazePerBlock was last updated.
-    uint256 public blocksPerDay = 14400; // The estimated number of mined blocks per day
-    uint256 public blockRewardPercentage = 5; // The percentage used for teazePerBlock calculation.
+    uint256 public blocksPerDay = 28800; // The estimated number of mined blocks per day
+    uint256 public blockRewardPercentage = 1; // The percentage used for teazePerBlock calculation.
     uint256 public unstakeFee = 1; //The percentage of Teaze tokens taken from staker at withdraw
     uint256 public noWaitFee = 2; //The percentage of Teaze tokens taken if staker doesn't want to wait for unstakeTime;
     uint256 public unstakeTime = 0; //86400; // Time in seconds to wait for withdrawal default (86400).
     uint256 public poolReward = 1000000000000; //starting basis for poolReward (default 1k).
-    uint256 public stakeReward = 5000000000000000; //starting basis for stakeReward (default 500k).
+    uint256 public stakeReward = 10000000000000000; //starting basis for stakeReward (default 10M).
     
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
@@ -384,11 +384,8 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                 updateVariablePoolReward();
             }
             
-            //if(_pid == 0) {
-             //   user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
-            //} else {
                 user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
-            //}
+
             emit Deposit(_msgSender(), _pid, _amount);
 
         }
@@ -498,11 +495,9 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             if (userAmount == _amount) { //user is retrieving entire balance, set rewardDebt to zero
                 user.rewardDebt = 0;
             } else {
-              //  if(_pid == 0) {
-              //     user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
-              //  } else {
-                    user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
-              //  }
+
+                user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
+
             }
 
         
@@ -598,7 +593,6 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         
         userBalance[_user] = userBalance[_user].add(value0);
 
-        //user.rewardDebt = ((user.amount.div(10)).mul(2)).mul(pool.accTeazePerShare).div(1e12); 
         user.rewardDebt = user.amount.mul(pool.accTeazePerShare).div(1e12); 
 
         uint256 pool1 = 1; 
