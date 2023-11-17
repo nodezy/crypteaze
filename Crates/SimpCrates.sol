@@ -30,10 +30,9 @@ interface ITeazePacks {
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
-   // function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256); 
 }
 
-interface Directory {
+interface IDirectory {
     function getInserter() external view returns (address);
     function getNFT() external view returns (address);
     function getPacks() external view returns (address);
@@ -44,7 +43,6 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    
     Counters.Counter public _LootBoxIds; //so we can track amount of lootboxes in creation
     Counters.Counter public unclaimedBoxes; //so we can limit the amount of active unclaimed lootboxes
     Counters.Counter public claimedBoxes; //so we can track the total amount of claimed lootboxes
@@ -66,8 +64,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     mapping(uint256 => uint256[]) public LootboxNFTids; // array of NFT ID's listed under each lootbox.
     mapping (uint256 => bool) public claimedNFT; //Whether the nft tokenID has been used to claim a lootbox or not.
 
-    
-    Directory public directory;
+    IDirectory public directory;
 
     uint256 public heldAmount; //Variable to determine how much BNB is in the contract not allocated to a lootbox
     uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
@@ -76,15 +73,17 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     uint256 public lootboxdogMax = 59; //Maximum roll the lootbox will require to unlock it
     uint256 public lootboxdogNormalizer = 31;
     uint256 private randNonce;
-    uint256 public rollFee = 0.001 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
-    uint256 public gasRefund = 0.0045 ether; //Amount to refund user who triggers the creation of a simpcrate
+    uint256 public rollFee = 0.002 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
+    uint256 public gasRefund = 0.003 ether; //Amount to refund user who triggers the creation of a simpcrate
     uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
     uint256 timeEnder = 86400; //time multiplier for when lootboxes end, based on mintclass (defautl 1 week)
     uint256 timeEndingFactor = 234; //will be multiplied by timeEnder and mintClass to get dynamic lifetimes on crates based on difficulty
     bool public boxesEnabled = true;
 
+    event ClaimResult(bool isWinner, bool indexed hasAllNFT, uint indexed userRoll, uint indexed dogRoll);
+
     constructor(address _directory) {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
         randNonce = Inserter(directory.getInserter()).getNonce();
         Inserter(directory.getInserter()).makeActive();
         addAuthorized(owner());
@@ -111,12 +110,11 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     function checkIfLootbox(address _checker) external nonReentrant {
 
-        //require(msg.sender == address(packsContract), "Sender is not packs contract");
+        require(msg.sender == address(directory.getPacks()), "Sender is not packs contract");
 
         uint256 _nftids = ITeazePacks(directory.getPacks()).getCurrentNFTID();
         
-        //if (heldAmount.add(maxRewardAmount) <= address(this).balance.add(gasRefund) && nftids >=3) {
-        if (true) {
+        if (heldAmount.add(maxRewardAmount) <= address(this).balance.add(gasRefund) && _nftids >=3) {
 
             //get 'lootboxable' NFT
             
@@ -156,7 +154,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                 uint256 nftroll;
                 
                 
-                for (uint256 x = 1; x <= nftPerLootbox; ++x) {
+                for (uint256 x = 1; x <= nftPerLootbox; x++) {
 
                     nftroll = Inserter(directory.getInserter()).getRandMod(randNonce, x, lootableNFTcount.mul(100)); //get a random nft
                     nftroll = nftroll+100;
@@ -165,6 +163,20 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
                     LootboxNFTids[lootboxid].push(lootableNFT[nftroll]);
 
+                    //now remove that nft from the array so we dont get duplicates in the lootbox 
+                    if(lootableNFT[nftroll] == lootableNFT[lootableNFTcount-1]) { //if last in array, make zero and decrement lootable array
+
+                        lootableNFT[nftroll] = 0;
+                        lootableNFTcount-=1;
+
+                    } else { //copy last array value to rolled array value, make last array value zero, decrement lootable count
+
+                        lootableNFT[nftroll] = lootableNFT[lootableNFTcount-1];
+                        lootableNFT[lootableNFTcount-1] = 0;
+                        lootableNFTcount-=1;
+                    }
+                    
+                  
                     mintclassTotals = mintclassTotals.add(ITeazePacks(directory.getPacks()).getNFTClass(lootableNFT[nftroll]));
                     percentTotals = percentTotals.add(ITeazePacks(directory.getPacks()).getNFTPercent(lootableNFT[nftroll]));
                     
@@ -200,7 +212,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         }
     }
 
-    function ClaimLootbox(uint256 _lootboxid) external payable nonReentrant returns (bool winner, bool used, uint256 roll, uint256 dogroll) {
+    function ClaimLootbox(uint256 _lootboxid) external payable nonReentrant returns (bool isWinner,  bool hasNFTs, uint256 roll, uint256 dogroll) {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
@@ -213,7 +225,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         bool result = false;
         bool hasNFTresult = true;
-        bool NFTunusedresult = false;
+        bool winner = false;
         uint256[] memory tokens = new uint256[](lootboxlength); //create array 
         uint256 tokentemp;
         uint256 userroll = 0;
@@ -223,16 +235,15 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
             (result,tokentemp) = checkWalletforNFT(x,_msgSender(), lootbox);
             hasNFTresult = hasNFTresult && result;
-            tokens[x] = tokentemp;
-            NFTunusedresult = NFTunusedresult || claimedNFT[tokentemp];
         }
 
-        if (hasNFTresult && !NFTunusedresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
+        if (hasNFTresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
             userroll = Inserter(directory.getInserter()).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_msgSender())))%100), 100); 
             userroll = userroll+1;
 
             if (userroll >= lootboxinfo.rollNumber) {
                 //transfer winnings to user, update struct, mark tokenIDs as ineligible for future lootboxes
+                winner = true;
                 payable(_msgSender()).transfer(lootboxinfo.rewardAmount);
                 heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
 
@@ -242,17 +253,13 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
                 lootboxinfo.claimed = true;
                 lootboxinfo.claimedBy = _msgSender();
-
-                claimedBoxes.increment();
-                unclaimedBoxes.decrement();
-
+                
                 retireLootbox(_lootboxid);
 
             } else {
-                //put logic here to expire lootbox and put lootbox reward back into pool for a new one
+                //put logic here to retire if lootbox is expired and put lootbox reward back into pool for a new one
                 if (block.timestamp > lootboxinfo.timeend) {
-                    claimedBoxes.increment();
-                    unclaimedBoxes.decrement();
+
                     heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
                     retireLootboxExpired(_lootboxid);
                 }
@@ -261,35 +268,42 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         payable(this).transfer(rollFee);
 
-        return (hasNFTresult, NFTunusedresult, userroll, lootboxinfo.rollNumber);
+        emit ClaimResult(winner, hasNFTresult, userroll, lootboxinfo.rollNumber);
+
+        return (winner, hasNFTresult, userroll, lootboxinfo.rollNumber);
 
     }   
 
     function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
         uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_holder);
-        bool result;
+        bool matches;
         uint256 token;
+
+        string memory boxuri = ITeazePacks(directory.getPacks()).getNFTURI(LootboxNFTids[_lootbox][_position]);
 
          for (uint256 y = 0; y < nftbalance; y++) {
 
-             string memory boxuri = ITeazePacks(directory.getPacks()).getNFTURI(LootboxNFTids[_lootbox][_position]);
              string memory holderuri = ITeazeNFT(directory.getNFT()).tokenURI(ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y));
 
             if (keccak256(bytes(boxuri)) == keccak256(bytes(holderuri))) {
-                result = true;
+                matches = true;
                 token = ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y);
-            } else {
-                result = false;
-                token = 0;
-            }
+
+                if (matches) {
+                    if(!claimedNFT[token]) {
+                       return (true, token);
+                    }
+                }
+                
+            } 
 
         }
 
-        return (result, tokenid);
+        return (false, 0);
     }
 
-    function checkIfWinnwer(uint256 _lootboxid, address _holder) external view returns (bool) {
+    function checkIfHasAllNFT(uint256 _lootboxid, address _holder) external view returns (bool) {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
@@ -299,17 +313,14 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         bool result = false;
         bool hasNFTresult = true;
-        bool NFTunusedresult = false;
-        uint256 tokentemp;
 
         for (uint x = 0; x < lootboxlength; x++) {
 
-            (result,tokentemp) = checkWalletforNFT(x, _holder, _lootboxid);
+            (result,) = checkWalletforNFT(x, _holder, _lootboxid);
             hasNFTresult = hasNFTresult && result;
-            NFTunusedresult = NFTunusedresult || claimedNFT[tokentemp];
         }
 
-        if ((lootboxinfo.claimed == false) && hasNFTresult && !NFTunusedresult) {return true;} else {return false;}       
+        if ((lootboxinfo.claimed == false) && hasNFTresult) {return true;} else {return false;}       
 
     }
 
@@ -392,10 +403,8 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         return lootboxinfo.rollNumber;
     }
 
-    function retireLootbox(uint256 _lootboxid) public { //change to internal for production
+    function retireLootbox(uint256 _lootboxid) internal { //change to internal for production
         uint arraylength = activelootboxarray.length;
-
-        require(_lootboxid <= arraylength, "E33");
 
         //Remove lootboxid from active array
         for(uint x = 0; x < arraylength; x++) {
@@ -408,7 +417,9 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
                 claimedBoxes.increment();
 
-                unclaimedBoxes.decrement();
+                 if(unclaimedBoxes.current() > 0) {
+                    unclaimedBoxes.decrement();
+                }
 
                 return;
             }
@@ -499,7 +510,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     }
 
     function changeDirectory(address _directory) external onlyAuthorized {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
     }
 
 }
