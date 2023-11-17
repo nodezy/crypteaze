@@ -22,6 +22,8 @@ interface ITeazeNFT {
     function ownerOf(uint256 tokenId) external view returns (address owner);
     function getApproved(uint256 tokenId) external view returns (address);
     function isApprovedForAll(address owner, address operator) external view returns (bool);
+    function balanceOf(address owner) external view returns (uint);
+    function setApprovalForAll(address operator, bool status) external;
 }
 
 interface Inserter {
@@ -34,7 +36,7 @@ interface ISimpCrates {
     function checkIfLootbox(address _checker) external;
 }
 
-interface Directory {
+interface IDirectory {
     function getFarm() external view returns (address);
     function getNFT() external view returns (address);
     function getCrates() external view returns (address);
@@ -50,9 +52,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     Counters.Counter public _PackIds; //so we can track which Packs have been added to the system
     Counters.Counter public _NFTIds; //so we can track which NFT's have been added to the Packs
     Counters.Counter public _LootBoxIds; //so we can track amount of lootboxes in creation
-    Counters.Counter public unclaimedBoxes; //so we can limit the amount of active unclaimed lootboxes
-    Counters.Counter public claimedBoxes; //so we can track the total amount of claimed lootboxes
-
+    
     struct PackInfo { //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchasable, exists
         address packCreatorAddress; //wallet address of the Pack creator
         string collectionName; // Name of nft creator/influencer/artist
@@ -92,7 +92,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
 
-    Directory public directory;
+    IDirectory public directory;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
@@ -101,11 +101,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint256 nftburnmultiple = 5;
      
     constructor(address _directory) {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
         authorized[owner()] = true;
         randNonce = Inserter(directory.getInserter()).getNonce();
         Inserter(directory.getInserter()).makeActive();
         addWhitelisted(owner());
+        packs[0] = true;
     }
 
     receive() external payable {}
@@ -152,12 +153,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         }
 
-        for (uint256 i = 0; i < array.length; i++) { //now we take our array and scramble the contents
+        /*for (uint256 i = 0; i < array.length; i++) { //now we take our array and scramble the contents
             uint256 n = i + uint256(keccak256(abi.encodePacked(randNonce+i, _recipient))) % (array.length - i);
             uint256 temp = array[n];
             array[n] = array[i];
             array[i] = temp;
-        }
+        }*/
 
         uint256 nftid = array[roll];
         NFTInfo storage nftinfo = nftInfo[nftid];
@@ -240,9 +241,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
            nftinfo.nftName = _nftName;  
            nftinfo.uri = _URI;
            nftinfo.packID = _packID;
-           if (_mintPercent < 25) { nftinfo.mintClass = 3;}
-           if (_mintPercent >= 25 && _mintPercent < 50) { nftinfo.mintClass = 2;}
-           if (_mintPercent >= 50 && _mintPercent <= 100) { nftinfo.mintClass = 1;}
+           if (_mintPercent < 10) { nftinfo.mintClass = 3;}
+           if (_mintPercent >= 10 && _mintPercent < 20) { nftinfo.mintClass = 2;}
+           if (_mintPercent >= 20 && _mintPercent <= 100) { nftinfo.mintClass = 1;}
            nftinfo.mintPercent = _mintPercent;
            nftinfo.lootboxable = _lootboxable; //Whether this NFT can be added to a lootbox
            nftinfo.exists = true;
@@ -515,7 +516,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     
 
     // Get pack info
-    function getPackInfo(uint256 _packid) internal view returns (uint256,uint256,uint256,uint256,bool,bool) {
+    function getPackInfo(uint256 _packid) public view returns (uint256,uint256,uint256,uint256,bool,bool) {
         PackInfo storage packinfo = packInfo[_packid];
         return (packinfo.price,packinfo.priceStep,packinfo.sbxprice,packinfo.mintLimit,packinfo.redeemable,packinfo.purchasable);
 
@@ -663,6 +664,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return (nftinfo.mintPercent);
     }
 
+      function setNFTPercent(uint256 _nftid, uint256 _mintPercent) external onlyAuthorized {
+         NFTInfo storage nftinfo = nftInfo[_nftid];
+        nftinfo.mintPercent = _mintPercent;
+    }
+
     function getLootboxAble(uint256 _nftid) public view returns (bool) {
         NFTInfo storage nftinfo = nftInfo[_nftid];
         return nftinfo.lootboxable;
@@ -716,12 +722,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function getNFTSBXburnAmount(uint _tokenID) public view returns (uint) {
         uint percent = getNFTPercent(getIDbyURI(ITeazeNFT(directory.getNFT()).tokenURI(_tokenID)));
 
-        uint SBXamount = (nftburnratio.sub(percent)).mul(nftburnratio);
+        uint SBXamount = (nftburnratio.sub(percent)).mul(nftburnmultiple);
 
         return SBXamount.mul(1000000000); //add 9 zeros
     }
 
-    function burnNFTforSBX(uint _tokenID) external {
+    function burnNFTforSBX(uint _tokenID) public nonReentrant {
         
         require(IERC721(directory.getNFT()).ownerOf(_tokenID) == address(_msgSender()), "E34");
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
@@ -731,7 +737,53 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     function changeDirectory(address _directory) external onlyAuthorized {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
+    }
+
+    //this will probably use a ton of gas
+    function burnAllFromPack(uint _packID) external nonReentrant {
+
+        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+       
+        //check for approval
+        require(ITeazeNFT(directory.getNFT()).isApprovedForAll(address(_msgSender()),address(this)), "E86");
+
+        //make sure pack exists
+        require(packs[_packID], "E14");
+
+        //get all nftids for this pack
+        uint packlength = PackNFTids[_packID].length;
+
+        uint256[] memory ids = new uint256[](packlength);
+
+        (ids,,) = getAllNFTbyPack(_packID);
+
+        
+        //get user wallet NFT balance
+        //Loop through user wallet
+        uint userbalance = ITeazeNFT(directory.getNFT()).balanceOf(_msgSender());
+
+        if (userbalance > 0) {
+
+            for (uint256 x = userbalance; x > 0; x--) {
+                for (uint256 y = 0; y < ids.length; y++) {
+                    if(ids[y] == getIDbyURI(ITeazeNFT(directory.getNFT()).tokenURI(ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_msgSender(), x-1)))) {
+                        
+                        ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(ids[y])); 
+                        IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), DEAD, ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_msgSender(), x-1));
+
+                        break;
+                        
+                    }
+
+                }
+
+            }
+
+        } else {
+            return;
+        }
+
     }
 
 }
