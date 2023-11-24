@@ -86,7 +86,6 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     mapping(uint => uint256[]) public PackNFTids; // array of NFT ID's listed under each pack.
     
-    mapping (uint256 => bool) public claimed; //Whether the nft tokenID has been used to claim a lootbox or not.
     mapping(uint => uint256) public PackNFTmints; //number of NFT minted from a certain pack.
     mapping(address => mapping(uint => uint)) public userPackPurchased; //How many of each pack a certain address has minted.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
@@ -241,9 +240,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
            nftinfo.nftName = _nftName;  
            nftinfo.uri = _URI;
            nftinfo.packID = _packID;
-           if (_mintPercent < 10) { nftinfo.mintClass = 3;}
-           if (_mintPercent >= 10 && _mintPercent < 20) { nftinfo.mintClass = 2;}
-           if (_mintPercent >= 20 && _mintPercent <= 100) { nftinfo.mintClass = 1;}
+           if (_mintPercent < 5) { nftinfo.mintClass = 6;}
+           if (_mintPercent >= 5 && _mintPercent < 15) { nftinfo.mintClass = 5;}
+           if (_mintPercent >= 15 && _mintPercent < 20) { nftinfo.mintClass = 4;}
+           if (_mintPercent >= 20 && _mintPercent < 25) { nftinfo.mintClass = 3;}
+           if (_mintPercent >= 25 && _mintPercent < 30) { nftinfo.mintClass = 2;}
+           if (_mintPercent >= 30) { nftinfo.mintClass = 1;}
            nftinfo.mintPercent = _mintPercent;
            nftinfo.lootboxable = _lootboxable; //Whether this NFT can be added to a lootbox
            nftinfo.exists = true;
@@ -785,6 +787,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         }
 
     }
+
 
 }
 
