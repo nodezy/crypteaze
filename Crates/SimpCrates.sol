@@ -25,11 +25,13 @@ interface ITeazePacks {
     function getLootboxAble(uint256 _nftid) external view returns (bool); 
     function getPackTimelimitCrates(uint256 _nftid) external view returns (bool);
     function getNFTExists(uint256 _nftid) external view returns (bool);
+    function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
 }
 
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
+    function getUserTokenIDtoNFTID(address _holder, uint _tokenID) external view returns (uint256);
 }
 
 interface IDirectory {
@@ -68,13 +70,13 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     uint256 public heldAmount; //Variable to determine how much BNB is in the contract not allocated to a lootbox
     uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
-    uint256 public rewardPerClass = 33333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
+    uint256 public rewardPerClass = 16666666666666667; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint256 public nftPerLootbox = 3;
     uint256 public lootboxdogMax = 59; //Maximum roll the lootbox will require to unlock it
     uint256 public lootboxdogNormalizer = 31;
     uint256 private randNonce;
     uint256 public rollFee = 0.002 ether; //Fee the contract takes for each attempt at opening the lootbox once the user has the NFTs
-    uint256 public gasRefund = 0.003 ether; //Amount to refund user who triggers the creation of a simpcrate
+    uint256 public gasRefund = 0.0035 ether; //Amount to refund user who triggers the creation of a simpcrate
     uint256 public unclaimedLimiter = 30; //Sets total number of unclaimed lootboxes that can be active at any given time
     uint256 timeEnder = 86400; //time multiplier for when lootboxes end, based on mintclass (defautl 1 week)
     uint256 timeEndingFactor = 234; //will be multiplied by timeEnder and mintClass to get dynamic lifetimes on crates based on difficulty
@@ -234,6 +236,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         for (uint x = 0; x < lootboxlength; x++) {
 
             (result,tokentemp) = checkWalletforNFT(x,_msgSender(), lootbox);
+            tokens[x] = tokentemp;
             hasNFTresult = hasNFTresult && result;
         }
 
@@ -274,7 +277,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     }   
 
-    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
+   /* function checkWalletforNFTOLD(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
         uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_holder);
         bool matches;
@@ -294,6 +297,27 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                     if(!claimedNFT[token]) {
                        return (true, token);
                     }
+                }
+                
+            } 
+
+        }
+
+        return (false, 0);
+    } */
+
+    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
+
+        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_holder);
+       
+        for (uint256 y = 0; y < nftbalance; y++) {
+
+            uint usertokenid = ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y);
+
+            if(LootboxNFTids[_lootbox][_position] == ITeazeNFT(directory.getNFT()).getUserTokenIDtoNFTID(_holder,usertokenid)) {
+              
+                if(!claimedNFT[usertokenid]) {
+                    return (true, usertokenid);
                 }
                 
             } 
