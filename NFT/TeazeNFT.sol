@@ -13,13 +13,12 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 
 interface ITeazePacks {
-    function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool); 
-    function getPackTotalMints(uint256 _packid) external view returns (uint256); 
     function getNFTURI(uint256 _nftid) external view returns (string memory);
     function getPackIDbyNFT(uint256 _nftid) external view returns (uint256);
+    function getIDbyURI(string memory _uri) external view returns (uint256);
 }
 
-interface Directory {
+interface IDirectory {
     function getPacks() external view returns (address);
 }
 
@@ -56,14 +55,15 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     mapping(string => uint) private NFTmintedCountURI;  // Get total # minted by URI.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
-   
-    Directory public directory;
+    mapping(address => mapping(uint => uint)) public UserTokenIDtoNFTID; //Mapping for user->tokenID->nftid from pack.
+       
+    IDirectory public directory;
     uint private minted;
     
 
     constructor(address _directory) ERC721("CryptezeNFT", "TeazeNFT") {
         addAuthorized(owner());
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
     }
 
     receive() external payable {}
@@ -77,6 +77,8 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     }
 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual override(ERC721, ERC721Enumerable) {
+        UserTokenIDtoNFTID[to][tokenId] = UserTokenIDtoNFTID[from][tokenId];
+        UserTokenIDtoNFTID[from][tokenId] = 0;
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
@@ -84,7 +86,6 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         return ERC721URIStorage._burn(tokenId);
     }
     
-
     function mint(address _recipient, string memory _uri, uint _packNFTid) public nonReentrant returns (uint256) {
 
         require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
@@ -96,11 +97,13 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         _mint(_recipient, newItemId);
         _setTokenURI(newItemId, _uri);
 
-        NFTmintedCountURI[_uri] = NFTmintedCountURI[_uri] + 1;
+        NFTmintedCountURI[_uri] ++;
 
-        NFTmintedCountID[_packNFTid] = NFTmintedCountID[_packNFTid] + 1;
+        NFTmintedCountID[_packNFTid] ++;
 
-        return newItemId;
+        UserTokenIDtoNFTID[_recipient][newItemId] = _packNFTid;
+
+        return newItemId; 
 
     }
 
@@ -116,9 +119,9 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         _mint(_msgSender(), newItemId);
         _setTokenURI(newItemId, _uri);
 
-        NFTmintedCountURI[_uri] = NFTmintedCountURI[_uri] + 1;
+        NFTmintedCountURI[_uri] ++;
 
-        NFTmintedCountID[_packNFTid] = NFTmintedCountID[_packNFTid] + 1;
+        NFTmintedCountID[_packNFTid] ++;
 
         return newItemId;
 
@@ -134,8 +137,8 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         return NFTmintedCountURI[_tokenURI];
     }
 
-    function mintedCountbyID(uint256 _id) public view returns (uint256) {
-        return NFTmintedCountID[_id];
+    function mintedCountbyID(uint256 _nftid) public view returns (uint256) {
+        return NFTmintedCountID[_nftid];
     }
 
     function rescueETHFromContract() external onlyOwner {
@@ -149,7 +152,11 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     }
 
     function changeDirectory(address _directory) external onlyAuthorized {
-        directory = Directory(_directory);
+        directory = IDirectory(_directory);
+    }
+
+    function getUserTokenIDtoNFTID(address _holder, uint _tokenID) external view returns (uint256 nftid) {
+        return UserTokenIDtoNFTID[_holder][_tokenID];
     }
 
 }
