@@ -4,50 +4,80 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./auth.sol";
 
-interface Directory {
-    function getNFT() external view returns (address);
-    function getPacks() external view returns (address);
-    function getCrates() external view returns (address);
+interface ITeazeNFT {
+    function tokenURI(uint256 tokenId) external view returns (string memory); 
+    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
+    function getUserTokenIDtoNFTID(address _holder, uint _tokenID) external view returns (uint256);
 }
 
-contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
+interface ITeazePacks {
+    function getNFTURI(uint256 _nftid) external view returns (string memory);
+    function getPackIDbyNFT(uint256 _nftid) external view returns (uint256);
+    function getIDbyURI(string memory _uri) external view returns (uint256);
+}
+
+interface IDirectory {
+    function getInserter() external view returns (address);
+    function getNFT() external view returns (address);
+    function getPacks() external view returns (address);
+}
+
+contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
 
-    Counters.Counter private _itemsHeld;
-    Counters.Counter private _itemsSold;
+    Counters.Counter public _itemsHeld;
+    Counters.Counter public _itemsSold;
+    Counters.Counter public _itemsTotal;
 
     uint256 listingFee = 0.0025 ether;
     uint256 buyingFee = 0.0025 ether;
     
-    mapping(uint256 => MarketItem) private idToMarketItem;
+    mapping(uint256 => MarketItem) public idToMarketItem;
+    uint256[] public heldtokens;
+    uint256[] public soldtokens;
     
     struct MarketItem {
       uint256 tokenId;
+      uint256 price;
+      uint128 nftid;
+      uint128 pack;
       address payable seller;
       address payable owner;
-      uint256 price;
       bool sold;
     }
 
     event MarketItemCreated (
-      uint256 indexed tokenId,
-      address seller,
-      address owner,
+      address indexed seller,
+      uint256 tokenId,
       uint256 price,
-      bool sold
+      uint256 time
     );
 
-    Directory public directory;
-    uint256 public feeTotals;
+    event MarketItemSold (
+      address indexed seller,
+      address indexed buyer,
+      uint256 tokenId,
+      uint256 price,
+      bool sold,
+      uint256 time
+    );
 
-    constructor(address _directory)  {
-      directory = Directory(_directory);
+    bool public production = false;
+    uint256 public feeTotals;
+    
+    IDirectory public directory;
+
+    constructor(address _directory) {
+        directory = IDirectory(_directory);
+        authorized[owner()] = true;
     }   
 
     receive() external payable {}
@@ -77,43 +107,64 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
     ) external payable nonReentrant {
       require(price > 0, "Price must be at least 1 wei");
       require(msg.value == listingFee, "Please include listing fee in order to list the item");
+      
+      if(production) {
+        
+      }
 
-      idToMarketItem[tokenId] =  MarketItem(
-        tokenId,
-        payable(msg.sender),
-        payable(address(this)),
-        price,
-        false
-      );
+      heldtokens.push(tokenId);
 
-      IERC721(directory.getNFT()).safeTransferFrom(msg.sender, address(this), tokenId);
+      idToMarketItem[tokenId].tokenId = tokenId;
+      idToMarketItem[tokenId].price = price;
 
-      payable(directory.getCrates()).transfer(listingFee);
+      uint _nftid = ITeazeNFT(directory.getNFT()).getUserTokenIDtoNFTID(_msgSender(), tokenId); 
+      uint _packid = ITeazePacks(directory.getPacks()).getPackIDbyNFT(_nftid);
+
+      idToMarketItem[tokenId].nftid = uint128(_nftid); 
+      idToMarketItem[tokenId].pack = uint128(_packid);
+      idToMarketItem[tokenId].seller = payable(_msgSender());
+      idToMarketItem[tokenId].owner = payable(address(this));
+      idToMarketItem[tokenId].sold = false;
+
+      IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), tokenId);
+
+      payable(this).transfer(listingFee);
 
       feeTotals = feeTotals.add(listingFee);
 
       _itemsHeld.increment();
+      _itemsTotal.increment();
       
       emit MarketItemCreated(
+        _msgSender(),
         tokenId,
-        msg.sender,
-        address(this),
         price,
-        false
+        block.timestamp
       );
     }
 
     /* allows someone to remove a token they have listed */
     function removeMarketItem(uint256 tokenId) external nonReentrant {
-      require(idToMarketItem[tokenId].owner == msg.sender, "Only item owner can perform this operation");
-      //require(msg.value == listingFee, "Price must be equal to listing price");
+
+      require(idToMarketItem[tokenId].seller == address(_msgSender()) || owner() == address(_msgSender()), "Only item seller can perform this operation");
+      
       idToMarketItem[tokenId].sold = false;
       idToMarketItem[tokenId].price = 0;
       idToMarketItem[tokenId].seller = payable(address(0));
       idToMarketItem[tokenId].owner = payable(address(0));
+      idToMarketItem[tokenId].nftid = 0;    
+      idToMarketItem[tokenId].pack = 0;
+
       _itemsHeld.decrement();
 
-      IERC721(directory.getNFT()).safeTransferFrom(address(this), msg.sender, tokenId);
+      for(uint x=0; x<heldtokens.length; x++) {                                     
+        if(heldtokens[x] == tokenId) {
+            heldtokens[x] = heldtokens[heldtokens.length-1];
+            heldtokens.pop();
+        }
+      }
+
+      IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), tokenId);
     }
 
     /* Creates the sale of a marketplace item */
@@ -124,81 +175,145 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
       uint price = idToMarketItem[tokenId].price;
       address seller = idToMarketItem[tokenId].seller;
       require(msg.value == price.add(buyingFee), "Please submit the asking price + fee in order to complete the purchase");
-      idToMarketItem[tokenId].owner = payable(msg.sender);
+
+      idToMarketItem[tokenId].owner = payable(_msgSender());
       idToMarketItem[tokenId].sold = true;
-      idToMarketItem[tokenId].seller = payable(address(0));
+      idToMarketItem[tokenId].seller = payable(seller);
+
       _itemsHeld.decrement();
       _itemsSold.increment();
-      IERC721(directory.getNFT()).safeTransferFrom(address(this), msg.sender, tokenId);
-      payable(directory.getCrates()).transfer(buyingFee);
+
+      IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), tokenId);
+      payable(this).transfer(buyingFee);
       feeTotals = feeTotals.add(buyingFee);
       payable(seller).transfer(msg.value.sub(buyingFee));
+
+      for(uint x=0; x<heldtokens.length; x++) {                                     
+        if(heldtokens[x] == tokenId) {
+            heldtokens[x] = heldtokens[heldtokens.length-1];
+            heldtokens.pop();
+        }
+      }
+
+      soldtokens.push(tokenId);
+
+      emit MarketItemSold(
+        seller,
+        _msgSender(),
+        tokenId,
+        price,
+        true,
+        block.timestamp
+      );
     }
 
     /* Returns all unsold market items */
-    function fetchMarketItems() public view returns (MarketItem[] memory) {
-      uint itemCount = _itemsHeld.current();
-      uint unsoldItemCount = _itemsHeld.current() - _itemsSold.current();
-      uint currentIndex = 0;
+    function fetchMarketItems(uint _pack, uint _nftid) public view returns (MarketItem[] memory) {
 
-      MarketItem[] memory items = new MarketItem[](unsoldItemCount);
-      for (uint i = 0; i < itemCount; i++) {
-        if (idToMarketItem[i + 1].owner == address(this)) {
-          uint currentId = i + 1;
-          MarketItem storage currentItem = idToMarketItem[currentId];
-          items[currentIndex] = currentItem;
-          currentIndex += 1;
+      uint itemCount = _itemsHeld.current();
+
+      if(itemCount > 0) {
+
+        uint currentIndex = 0;
+
+        MarketItem[] memory items = new MarketItem[](itemCount);
+
+        if(_pack == 99 && _nftid == 0) { //get all
+
+            for (uint i = 0; i < itemCount; i++) {
+                if (idToMarketItem[heldtokens[i]].owner == address(this)) {
+                items[currentIndex] = idToMarketItem[heldtokens[i]];
+                currentIndex++;
+                }
+            }
+            return items;
+
+        } else {
+
+            if(_pack != 99 && _nftid == 0) { //get all from pack
+
+                for (uint i = 0; i < itemCount; i++) {
+                    if (idToMarketItem[heldtokens[i]].owner == address(this) 
+                    && idToMarketItem[heldtokens[i]].pack == _pack) {
+                    items[currentIndex] = idToMarketItem[heldtokens[i]];
+                    currentIndex++;
+                    }
+                }
+                return items;
+
+            } else {
+
+                for (uint i = 0; i < itemCount; i++) { //get pack and single nft
+                    if (idToMarketItem[heldtokens[i]].owner == address(this) 
+                    && idToMarketItem[heldtokens[i]].pack == _pack
+                    && idToMarketItem[heldtokens[i]].nftid == _nftid) {
+                    items[currentIndex] = idToMarketItem[heldtokens[i]];
+                    currentIndex++;
+                    }
+                }
+                return items;
+            }
         }
-      }
-      return items;
+        
+      } else {
+        return new MarketItem[](0);
+      }       
     }
 
     /* Returns only items that a user has purchased */
-    function fetchMyNFTs() public view returns (MarketItem[] memory) {
-      uint totalItemCount = _itemsHeld.current();
-      uint itemCount = 0;
-      uint currentIndex = 0;
+    function fetchMyNFTs(address _user) public view returns (MarketItem[] memory) {
 
-      for (uint i = 0; i < totalItemCount; i++) {
-        if (idToMarketItem[i + 1].owner == msg.sender) {
-          itemCount += 1;
-        }
-      }
+      if(soldtokens.length > 0) {
+        uint itemCount = 0;
+        uint currentIndex = 0;
 
-      MarketItem[] memory items = new MarketItem[](itemCount);
-      for (uint i = 0; i < totalItemCount; i++) {
-        if (idToMarketItem[i + 1].owner == msg.sender) {
-          uint currentId = i + 1;
-          MarketItem storage currentItem = idToMarketItem[currentId];
-          items[currentIndex] = currentItem;
-          currentIndex += 1;
+        for (uint i = 0; i < soldtokens.length; i++) {
+            if (idToMarketItem[soldtokens[i]].owner == _user) {
+            itemCount++;
+            }
         }
+
+        MarketItem[] memory items = new MarketItem[](itemCount);
+        for (uint i = 0; i < soldtokens.length; i++) {
+            if (idToMarketItem[soldtokens[i]].owner == _user) {
+            items[currentIndex] = idToMarketItem[soldtokens[i]];
+            currentIndex++;
+            }
+        }
+        return items;
+
+      } else {
+        return new MarketItem[](0);
       }
-      return items;
     }
 
     /* Returns only items a user has listed */
-    function fetchItemsListed() public view returns (MarketItem[] memory) {
+    function fetchItemsListed(address _seller) public view returns (MarketItem[] memory) {
       uint totalItemCount = _itemsHeld.current();
-      uint itemCount = 0;
-      uint currentIndex = 0;
 
-      for (uint i = 0; i < totalItemCount; i++) {
-        if (idToMarketItem[i + 1].seller == msg.sender) {
-          itemCount += 1;
-        }
-      }
+      if(totalItemCount > 0) {
+            uint itemCount = 0;
+            uint currentIndex = 0;
 
-      MarketItem[] memory items = new MarketItem[](itemCount);
-      for (uint i = 0; i < totalItemCount; i++) {
-        if (idToMarketItem[i + 1].seller == msg.sender) {
-          uint currentId = i + 1;
-          MarketItem storage currentItem = idToMarketItem[currentId];
-          items[currentIndex] = currentItem;
-          currentIndex += 1;
+        for (uint i = 0; i < totalItemCount; i++) {
+            if (idToMarketItem[heldtokens[i]].seller == _seller) {
+            itemCount++;
+            }
         }
+
+        MarketItem[] memory items = new MarketItem[](itemCount);
+        for (uint i = 0; i < totalItemCount; i++) {
+            if (idToMarketItem[heldtokens[i]].seller == _seller) {
+            items[currentIndex] = idToMarketItem[heldtokens[i]];
+            currentIndex++;
+            }
+        }
+        
+        return items;
+
+      } else {
+        return new MarketItem[](0);
       }
-      return items;
     }
 
      function onERC721Received(address, address, uint256, bytes memory) public virtual override returns (bytes4) {
@@ -217,7 +332,11 @@ contract TeazeMarketplace is Ownable, IERC721Receiver, ReentrancyGuard {
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
 
-    function changeDirectory(address _directory) external onlyOwner {
-        directory = Directory(_directory);
+    function setProduction(bool _status) external onlyOwner {
+      production = _status;
+    }
+
+    function changeDirectory(address _directory) external onlyAuthorized {
+        directory = IDirectory(_directory);
     }
 }
