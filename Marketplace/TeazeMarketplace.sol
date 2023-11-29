@@ -27,6 +27,7 @@ interface IDirectory {
     function getInserter() external view returns (address);
     function getNFT() external view returns (address);
     function getPacks() external view returns (address);
+    function getCrates() external view returns (address);
 }
 
 contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard {
@@ -128,7 +129,7 @@ contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard 
 
       IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), tokenId);
 
-      payable(this).transfer(listingFee);
+      payable(directory.getCrates()).transfer(listingFee);
 
       feeTotals = feeTotals.add(listingFee);
 
