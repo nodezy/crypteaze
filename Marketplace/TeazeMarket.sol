@@ -30,7 +30,7 @@ interface IDirectory {
     function getCrates() external view returns (address);
 }
 
-contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard {
+contract TeazeMarket is Ownable, Authorizable, Whitelisted, IERC721Receiver, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
 
@@ -71,7 +71,6 @@ contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard 
       uint256 time
     );
 
-    bool public production = false;
     uint256 public feeTotals;
     
     IDirectory public directory;
@@ -106,12 +105,9 @@ contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard 
       uint256 tokenId,
       uint256 price
     ) external payable nonReentrant {
+      
       require(price > 0, "Price must be at least 1 wei");
       require(msg.value == listingFee, "Please include listing fee in order to list the item");
-      
-      if(production) {
-        
-      }
 
       heldtokens.push(tokenId);
 
@@ -185,7 +181,7 @@ contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard 
       _itemsSold.increment();
 
       IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), tokenId);
-      payable(this).transfer(buyingFee);
+      payable(directory.getCrates()).transfer(buyingFee);
       feeTotals = feeTotals.add(buyingFee);
       payable(seller).transfer(msg.value.sub(buyingFee));
 
@@ -331,10 +327,6 @@ contract TeazeMarket is Ownable, Authorizable, IERC721Receiver, ReentrancyGuard 
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
-    }
-
-    function setProduction(bool _status) external onlyOwner {
-      production = _status;
     }
 
     function changeDirectory(address _directory) external onlyAuthorized {
