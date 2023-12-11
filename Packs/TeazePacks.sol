@@ -114,13 +114,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         randNonce++;
 
-        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_recipient);
+        address farm = directory.getFarm();
+        address nft = directory.getNFT();
+
+        uint256 nftbalance = IERC721(nft).balanceOf(_recipient);
         if (_recipient != owner()) {
             require(nftbalance <= 100, "E01");
         }
         
         require(address(directory.getFarm()) != address(0), "E02");
-        require(msg.sender == address(directory.getFarm()), "E03");
+        require(msg.sender == address(farm), "E03");
 
         PackInfo storage packinfo = packInfo[_packid];
 
@@ -152,13 +155,6 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         }
 
-        /*for (uint256 i = 0; i < array.length; i++) { //now we take our array and scramble the contents
-            uint256 n = i + uint256(keccak256(abi.encodePacked(randNonce+i, _recipient))) % (array.length - i);
-            uint256 temp = array[n];
-            array[n] = array[i];
-            array[i] = temp;
-        }*/
-
         uint256 nftid = array[roll];
         NFTInfo storage nftinfo = nftInfo[nftid];
         
@@ -170,7 +166,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
 
-        return ITeazeNFT(directory.getNFT()).mint(_recipient, nftinfo.uri, nftid);
+        return ITeazeNFT(nft).mint(_recipient, nftinfo.uri, nftid);
 
     }
 
@@ -730,12 +726,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     function burnNFTforSBX(uint _tokenID) public nonReentrant {
+
+        address farm = directory.getFarm();
+        address nft = directory.getNFT();
         
-        require(IERC721(directory.getNFT()).ownerOf(_tokenID) == address(_msgSender()), "E34");
-        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        require(IERC721(nft).ownerOf(_tokenID) == address(_msgSender()), "E34");
+        require(ITeazeFarm(farm).getUserStaked(_msgSender()), "E35");
        
-        ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(_tokenID)); 
-        IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), DEAD, _tokenID);
+        ITeazeFarm(farm).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(_tokenID)); 
+        IERC721(nft).safeTransferFrom(_msgSender(), DEAD, _tokenID);
     }
 
     function changeDirectory(address _directory) external onlyAuthorized {
@@ -745,10 +744,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     //this will probably use a ton of gas
     function burnAllFromPack(uint _packID) external nonReentrant {
 
-        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        address farm = directory.getFarm();
+        address nft = directory.getNFT();
+
+        require(ITeazeFarm(farm).getUserStaked(_msgSender()), "E35");
        
         //check for approval
-        require(ITeazeNFT(directory.getNFT()).isApprovedForAll(address(_msgSender()),address(this)), "E86");
+        require(ITeazeNFT(nft).isApprovedForAll(address(_msgSender()),address(this)), "E86");
 
         //make sure pack exists
         require(packs[_packID], "E14");
@@ -763,16 +765,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         
         //get user wallet NFT balance
         //Loop through user wallet
-        uint userbalance = ITeazeNFT(directory.getNFT()).balanceOf(_msgSender());
+        uint userbalance = ITeazeNFT(nft).balanceOf(_msgSender());
 
         if (userbalance > 0) {
 
             for (uint256 x = userbalance; x > 0; x--) {
                 for (uint256 y = 0; y < ids.length; y++) {
-                    if(ids[y] == getIDbyURI(ITeazeNFT(directory.getNFT()).tokenURI(ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_msgSender(), x-1)))) {
+                    if(ids[y] == getIDbyURI(ITeazeNFT(nft).tokenURI(ITeazeNFT(nft).tokenOfOwnerByIndex(_msgSender(), x-1)))) {
                         
-                        ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(ids[y])); 
-                        IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), DEAD, ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_msgSender(), x-1));
+                        ITeazeFarm(farm).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(ids[y])); 
+                        IERC721(nft).safeTransferFrom(_msgSender(), DEAD, ITeazeNFT(nft).tokenOfOwnerByIndex(_msgSender(), x-1));
 
                         break;
                         
