@@ -112,9 +112,11 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     function checkIfLootbox(address _checker) external nonReentrant {
 
-        require(msg.sender == address(directory.getPacks()), "Sender is not packs contract");
+         address packs = directory.getPacks();
 
-        uint256 _nftids = ITeazePacks(directory.getPacks()).getCurrentNFTID();
+        require(msg.sender == address(packs), "Sender is not packs contract");
+
+        uint256 _nftids = ITeazePacks(packs).getCurrentNFTID();
         
         if (heldAmount.add(maxRewardAmount) <= address(this).balance.add(gasRefund) && _nftids >=3) {
 
@@ -124,7 +126,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
             uint256 countmore;           
 
             for (uint x=1;x<=_nftids;x++) { //first time get all NFT that are live and lootable
-                if (ITeazePacks(directory.getPacks()).getLootboxAble(x) && ITeazePacks(directory.getPacks()).getPackTimelimitCrates(x)) {
+                if (ITeazePacks(packs).getLootboxAble(x) && ITeazePacks(packs).getPackTimelimitCrates(x)) {
                     count++;
                 }
             }
@@ -132,7 +134,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
             uint256[] memory lootableNFT = new uint256[](count); //Now create the correct sized memory array
 
             for (uint x=1;x<=_nftids;x++) { //Now populate array with the correct NFT so its packed correctly (no zeros)
-                if (ITeazePacks(directory.getPacks()).getLootboxAble(x) && ITeazePacks(directory.getPacks()).getPackTimelimitCrates(x)) {
+                if (ITeazePacks(packs).getLootboxAble(x) && ITeazePacks(packs).getPackTimelimitCrates(x)) {
                     lootableNFT[countmore]=x;
                     countmore++;
                 }
@@ -179,8 +181,8 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                     }
                     
                   
-                    mintclassTotals = mintclassTotals.add(ITeazePacks(directory.getPacks()).getNFTClass(lootableNFT[nftroll]));
-                    percentTotals = percentTotals.add(ITeazePacks(directory.getPacks()).getNFTPercent(lootableNFT[nftroll]));
+                    mintclassTotals = mintclassTotals.add(ITeazePacks(packs).getNFTClass(lootableNFT[nftroll]));
+                    percentTotals = percentTotals.add(ITeazePacks(packs).getNFTPercent(lootableNFT[nftroll]));
                     
                 }                  
 
@@ -277,48 +279,21 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     }   
 
-   /* function checkWalletforNFTOLD(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
+   function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
-        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_holder);
-        bool matches;
-        uint256 token;
+        address nft = directory.getNFT();
+        uint256 nftbalance = IERC721(nft).balanceOf(_holder);
 
-        string memory boxuri = ITeazePacks(directory.getPacks()).getNFTURI(LootboxNFTids[_lootbox][_position]);
-
-         for (uint256 y = 0; y < nftbalance; y++) {
-
-             string memory holderuri = ITeazeNFT(directory.getNFT()).tokenURI(ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y));
-
-            if (keccak256(bytes(boxuri)) == keccak256(bytes(holderuri))) {
-                matches = true;
-                token = ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y);
-
-                if (matches) {
-                    if(!claimedNFT[token]) {
-                       return (true, token);
-                    }
-                }
-                
-            } 
-
-        }
-
-        return (false, 0);
-    } */
-
-    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
-
-        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_holder);
        
         for (uint256 y = 0; y < nftbalance; y++) {
 
-            uint usertokenid = ITeazeNFT(directory.getNFT()).tokenOfOwnerByIndex(_holder, y);
+            uint usertokenid = ITeazeNFT(nft).tokenOfOwnerByIndex(_holder, y);
 
-            if(LootboxNFTids[_lootbox][_position] == ITeazeNFT(directory.getNFT()).getUserTokenIDtoNFTID(_holder,usertokenid)) {
+            if(LootboxNFTids[_lootbox][_position] == ITeazeNFT(nft).getUserTokenIDtoNFTID(_holder,usertokenid)) {
               
                 if(!claimedNFT[usertokenid]) {
                     return (true, usertokenid);
-                }
+                } 
                 
             } 
 
@@ -477,6 +452,8 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         require(msg.value == _rewardAmt, "E31");
 
+        address packs = directory.getPacks();
+
         randNonce++;
 
         _LootBoxIds.increment();
@@ -495,15 +472,15 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         
         for (uint256 x = 0; x < lootableNFT.length; ++x) {
 
-            if (ITeazePacks(directory.getPacks()).getNFTExists(lootableNFT[x])) {
+            if (ITeazePacks(packs).getNFTExists(lootableNFT[x])) {
 
                 LootboxNFTids[lootboxid].push(lootableNFT[x]);
 
-                mintclassTotals = mintclassTotals.add(ITeazePacks(directory.getPacks()).getNFTClass(lootableNFT[nftroll]));
-                percentTotals = percentTotals.add(ITeazePacks(directory.getPacks()).getNFTPercent(lootableNFT[nftroll]));
+                mintclassTotals = mintclassTotals.add(ITeazePacks(packs).getNFTClass(lootableNFT[nftroll]));
+                percentTotals = percentTotals.add(ITeazePacks(packs).getNFTPercent(lootableNFT[nftroll]));
 
             } else {
-                require(ITeazePacks(directory.getPacks()).getNFTExists(lootableNFT[x]), "E30");
+                require(ITeazePacks(packs).getNFTExists(lootableNFT[x]), "E30");
             }            
             
         }                  
