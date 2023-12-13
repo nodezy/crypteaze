@@ -167,6 +167,9 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
                     LootboxNFTids[lootboxid].push(lootableNFT[nftroll]);
 
+                    mintclassTotals += ITeazePacks(packs).getNFTClass(lootableNFT[nftroll]);
+                    percentTotals += ITeazePacks(packs).getNFTPercent(lootableNFT[nftroll]);
+
                     //now remove that nft from the array so we dont get duplicates in the lootbox 
                     if(lootableNFT[nftroll] == lootableNFT[lootableNFTcount-1]) { //if last in array, make zero and decrement lootable array
 
@@ -179,11 +182,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                         lootableNFT[lootableNFTcount-1] = 0;
                         lootableNFTcount-=1;
                     }
-                    
-                  
-                    mintclassTotals = mintclassTotals.add(ITeazePacks(packs).getNFTClass(lootableNFT[nftroll]));
-                    percentTotals = percentTotals.add(ITeazePacks(packs).getNFTPercent(lootableNFT[nftroll]));
-                    
+                                        
                 }                  
 
                 uint256 boxreward = rewardPerClass.mul(mintclassTotals);
