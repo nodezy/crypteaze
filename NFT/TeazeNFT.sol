@@ -86,7 +86,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         return ERC721URIStorage._burn(tokenId);
     }
     
-    function mint(address _recipient, string memory _uri, uint _packNFTid) public nonReentrant returns (uint256) {
+    function mint(address _recipient, string memory _uri, uint _nftid) public nonReentrant returns (uint256) {
 
         require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
         require(msg.sender == address(directory.getPacks()), "Minting not allowed outside of the Packs contract");
@@ -99,9 +99,9 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         NFTmintedCountURI[_uri] ++;
 
-        NFTmintedCountID[_packNFTid] ++;
+        NFTmintedCountID[_nftid] ++;
 
-        UserTokenIDtoNFTID[_recipient][newItemId] = _packNFTid;
+        UserTokenIDtoNFTID[_recipient][newItemId] = _nftid;
 
         return newItemId; 
 
@@ -113,15 +113,16 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         _tokenIds.increment();
         string memory _uri = ITeazePacks(directory.getPacks()).getNFTURI(_nftid);
-        uint256 _packNFTid = ITeazePacks(directory.getPacks()).getPackIDbyNFT(_nftid);
-        
+                
         uint256 newItemId = _tokenIds.current();
         _mint(_msgSender(), newItemId);
         _setTokenURI(newItemId, _uri);
 
         NFTmintedCountURI[_uri] ++;
 
-        NFTmintedCountID[_packNFTid] ++;
+        NFTmintedCountID[_nftid] ++;
+
+        UserTokenIDtoNFTID[_msgSender()][newItemId] = _nftid;
 
         return newItemId;
 
