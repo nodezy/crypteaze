@@ -114,16 +114,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         randNonce++;
 
-        address farm = directory.getFarm();
-        address nft = directory.getNFT();
-
-        uint256 nftbalance = IERC721(nft).balanceOf(_recipient);
+        uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_recipient);
         if (_recipient != owner()) {
             require(nftbalance <= 100, "E01");
         }
         
         require(address(directory.getFarm()) != address(0), "E02");
-        require(msg.sender == address(farm), "E03");
+        require(msg.sender == address(directory.getFarm()), "E03");
 
         PackInfo storage packinfo = packInfo[_packid];
 
@@ -160,13 +157,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         
         //update counters
 
-        NFTmintedCountID[nftid] = NFTmintedCountID[nftid] + 1;
+        NFTmintedCountID[nftid] += 1;
 
-        PackNFTmints[_packid] = PackNFTmints[_packid] + 1;
+        PackNFTmints[_packid] += 1;
 
         ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
 
-        return ITeazeNFT(nft).mint(_recipient, nftinfo.uri, nftid);
+        return ITeazeNFT(directory.getNFT()).mint(_recipient, nftinfo.uri, nftid);
 
     }
 
@@ -278,7 +275,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             ids[count] = PackNFTids[_packid][x];
             name[count] = nftinfo.nftName;
             percentTotal = percentTotal.add(nftinfo.mintPercent);
-            count = count+1;
+            count++;
            
         }
 
@@ -570,7 +567,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         require(msg.sender == address(directory.getFarm()), "E20");
 
-        userPackPurchased[_recipient][_packid] = userPackPurchased[_recipient][_packid] + 1;
+        userPackPurchased[_recipient][_packid] += 1;
     }
 
     
