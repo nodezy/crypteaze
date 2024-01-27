@@ -118,7 +118,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         uint256 _nftids = ITeazePacks(packs).getCurrentNFTID();
         
-        if (heldAmount.add(maxRewardAmount) <= address(this).balance.add(gasRefund) && _nftids >=3) {
+        if (address(this).balance.add(gasRefund) >= heldAmount.add(maxRewardAmount) && _nftids >=3) {
 
             //get 'lootboxable' NFT
             
@@ -429,7 +429,6 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
-        heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
         lootboxinfo.claimedBy = address(0x000000000000000000000000000000000000dEaD);
         lootboxinfo.claimed = true;
 
@@ -440,7 +439,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
-        heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
+        heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
         lootboxinfo.claimedBy = address(0x000000000000000000000000000000000000dEaD);
         lootboxinfo.claimed = true;
 
@@ -511,6 +510,25 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     function changeDirectory(address _directory) external onlyAuthorized {
         directory = IDirectory(_directory);
+    }
+
+    function getCrateCreationAmt() external view returns(uint, uint, uint, uint) {
+        return (heldAmount.add(maxRewardAmount),address(this).balance.add(gasRefund),gasRefund,maxRewardAmount);
+    }
+
+    function getLootboxNFTids(uint _lootbox) external view returns(uint256[] memory) {
+
+        uint256 lootboxlength = LootboxNFTids[_lootbox].length;
+
+        uint256[] memory lootableNFT = new uint256[](lootboxlength);
+
+        for (uint256 x = 0; x < lootboxlength; ++x) {
+
+           lootableNFT[x] = LootboxNFTids[_lootbox][x];
+        
+        }
+
+        return lootableNFT;
     }
 
 }
