@@ -82,7 +82,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     uint256 timeEndingFactor = 234; //will be multiplied by timeEnder and mintClass to get dynamic lifetimes on crates based on difficulty
     bool public boxesEnabled = true;
 
-    event ClaimResult(bool isWinner, bool indexed hasAllNFT, uint indexed userRoll, uint indexed dogRoll);
+    event ClaimResult(bool isWinner, bool indexed hasAllNFT, uint indexed userRoll, uint indexed dogRoll, bool isExpired);
 
     constructor(address _directory) {
         directory = IDirectory(_directory);
@@ -215,7 +215,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         }
     }
 
-    function ClaimLootbox(uint256 _lootboxid) external payable nonReentrant returns (bool isWinner,  bool hasNFTs, uint256 roll, uint256 dogroll) {
+    function ClaimLootbox(uint256 _lootboxid) external payable nonReentrant returns (bool isWinner,  bool hasNFTs, uint256 roll, uint256 dogroll, bool isretired) {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
@@ -229,6 +229,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         bool result = false;
         bool hasNFTresult = true;
         bool winner = false;
+        bool isRetired = false;
         uint256[] memory tokens = new uint256[](lootboxlength); //create array 
         uint256 tokentemp;
         uint256 userroll = 0;
@@ -258,23 +259,24 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                 lootboxinfo.claimed = true;
                 lootboxinfo.claimedBy = _msgSender();
                 
-                retireLootbox(_lootboxid);
+                retireLootbox(lootbox);
 
             } else {
                 //put logic here to retire if lootbox is expired and put lootbox reward back into pool for a new one
                 if (block.timestamp > lootboxinfo.timeend) {
 
                     heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
-                    retireLootboxExpired(_lootboxid);
+                    retireLootboxExpired(lootbox);
+                    isRetired = true;
                 }
             }
         }
 
         payable(this).transfer(rollFee);
 
-        emit ClaimResult(winner, hasNFTresult, userroll, lootboxinfo.rollNumber);
+        emit ClaimResult(winner, hasNFTresult, userroll, lootboxinfo.rollNumber, isRetired);
 
-        return (winner, hasNFTresult, userroll, lootboxinfo.rollNumber);
+        return (winner, hasNFTresult, userroll, lootboxinfo.rollNumber, isRetired);
 
     }   
 
@@ -529,6 +531,10 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         }
 
         return lootableNFT;
+    }
+
+    function isCrateReady() external view returns (bool) {
+        return (address(this).balance.add(gasRefund) >= heldAmount.add(maxRewardAmount));
     }
 
 }
