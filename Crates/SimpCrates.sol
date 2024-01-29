@@ -222,8 +222,6 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         require(!lootboxinfo.claimed, "E21");
         require(msg.value == rollFee, "E22");
 
-        //check wallet against Simpcrate NFT
-
         uint256 lootboxlength = LootboxNFTids[_lootboxid].length;
 
         bool result = false;
@@ -235,18 +233,20 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         uint256 userroll = 0;
         uint256 lootbox = _lootboxid; 
 
-        for (uint x = 0; x < lootboxlength; x++) {
+        userroll = Inserter(directory.getInserter()).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_msgSender())))%100), 100); 
+        userroll = userroll+1;
 
-            (result,tokentemp) = checkWalletforNFT(x,_msgSender(), lootbox);
-            tokens[x] = tokentemp;
-            hasNFTresult = hasNFTresult && result;
-        }
+        if (userroll >= lootboxinfo.rollNumber) {
 
-        if (hasNFTresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
-            userroll = Inserter(directory.getInserter()).getRandMod(randNonce, uint8(uint256(keccak256(abi.encodePacked(_msgSender())))%100), 100); 
-            userroll = userroll+1;
+            for (uint x = 0; x < lootboxlength; x++) { //check wallet against Simpcrate NFT
 
-            if (userroll >= lootboxinfo.rollNumber) {
+                (result,tokentemp) = checkWalletforNFT(x,_msgSender(), lootbox);
+                tokens[x] = tokentemp;
+                hasNFTresult = hasNFTresult && result;
+            }
+
+            if (hasNFTresult) { //user has all NFT, none have been used to obtain SimpCrate, roll to beat the dog
+
                 //transfer winnings to user, update struct, mark tokenIDs as ineligible for future lootboxes
                 winner = true;
                 payable(_msgSender()).transfer(lootboxinfo.rewardAmount);
@@ -262,14 +262,19 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
                 retireLootbox(lootbox);
 
             } else {
-                //put logic here to retire if lootbox is expired and put lootbox reward back into pool for a new one
-                if (block.timestamp > lootboxinfo.timeend) {
-
-                    heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
-                    retireLootboxExpired(lootbox);
-                    isRetired = true;
-                }
+                require(hasNFTresult, "E87");
             }
+
+        } else {
+
+            //put logic here to retire if lootbox is expired and put lootbox reward back into pool for a new one
+            if (block.timestamp > lootboxinfo.timeend) {
+
+                heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
+                retireLootboxExpired(lootbox);
+                isRetired = true;
+            }
+
         }
 
         payable(this).transfer(rollFee);
@@ -448,7 +453,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         retireLootbox(_lootboxid);
     }
 
-    function createLootboxAdmin(uint256 _nftid1, uint256 _nftid2, uint256 _nftid3, uint256 _rewardAmt) external payable onlyAuthorized {
+    function createLootboxAdmin(uint256 _nftid1, uint256 _nftid2, uint256 _nftid3, uint256 _rewardAmt, uint256 _timeend) external payable onlyAuthorized {
 
         require(msg.value == _rewardAmt, "E31");
 
@@ -494,7 +499,12 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
         lootboxinfo.mintclassTotal = mintclassTotals;
         lootboxinfo.percentTotal = percentTotals;
         lootboxinfo.rewardAmount = _rewardAmt;
-        lootboxinfo.timeend = block.timestamp.add(mintclassTotals.mul(timeEnder.mul(timeEndingFactor)).div(100));
+        if(_timeend == 0) {
+            lootboxinfo.timeend = block.timestamp.add(mintclassTotals.mul(timeEnder.mul(timeEndingFactor)).div(100));
+        } else {
+            lootboxinfo.timeend = _timeend;
+        }
+        
         lootboxinfo.claimedBy = address(0);
         lootboxinfo.claimed = false;
             
