@@ -270,7 +270,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
             //put logic here to retire if lootbox is expired and put lootbox reward back into pool for a new one
             if (block.timestamp > lootboxinfo.timeend) {
 
-                heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
+                heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
                 retireLootboxExpired(lootbox);
                 isRetired = true;
             }
@@ -446,7 +446,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         LootboxInfo storage lootboxinfo = lootboxInfo[_lootboxid];
 
-        heldAmount = heldAmount.add(lootboxinfo.rewardAmount);
+        heldAmount = heldAmount.sub(lootboxinfo.rewardAmount);
         lootboxinfo.claimedBy = address(0x000000000000000000000000000000000000dEaD);
         lootboxinfo.claimed = true;
 
