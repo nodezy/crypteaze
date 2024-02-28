@@ -34,6 +34,7 @@ interface Inserter {
 
 interface ISimpCrates {
     function checkIfLootbox(address _checker) external;
+    function claimedNFT(uint token) external view returns (bool);
 }
 
 interface IDirectory {
@@ -719,7 +720,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         uint SBXamount = (nftburnratio.sub(percent)).mul(nftburnmultiple);
 
-        return SBXamount.mul(1000000000); //add 9 zeros
+        if(ISimpCrates(directory.getCrates()).claimedNFT(_tokenID)) {
+
+            return SBXamount.mul(500000000); //add 8 zeros (half)
+
+        } else {
+
+            return SBXamount.mul(1000000000); //add 9 zeros
+            
+        }
+
     }
 
     function burnNFTforSBX(uint _tokenID) public nonReentrant {
