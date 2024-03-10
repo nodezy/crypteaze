@@ -69,9 +69,10 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
     IDirectory public directory;
 
     uint256 public heldAmount; //Variable to determine how much BNB is in the contract not allocated to a lootbox
-    uint256 public maxRewardAmount = 300000000000000006; //Maximum reward of a lootbox (simpcrate)
-    uint256 public rewardPerClass = 16666666666666667; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
+    uint256 public maxRewardAmount = 240000000000000012; //Maximum reward of a lootbox (simpcrate)
+    uint256 public rewardPerClass = 13333333333333334; //Amount each class # adds to reward (maxRewardAmount / nftPerLootBox)
     uint256 public nftPerLootbox = 3;
+    uint256 public rewardDivisor = 6;
     uint256 public lootboxdogMax = 59; //Maximum roll the lootbox will require to unlock it
     uint256 public lootboxdogNormalizer = 31;
     uint256 private randNonce;
@@ -329,7 +330,7 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     }
 
-    function updateRewardAmounts(uint256 _maxRewardAmount, uint256 _nftPerLootbox, bool _auth) external onlyAuthorized {
+    function updateRewardAmounts(uint256 _maxRewardAmount, bool _auth) external onlyAuthorized {
 
         //the larger the _maxRewardAmount the longer it will take the contract to create a lootbox
         //the more _nftPerLootbox the harder they will be to open, taking longer for users to collect the appropriate NFTs
@@ -338,14 +339,27 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
         if (!_auth) {
             require(_maxRewardAmount < 0.5 ether, "E23");
-            require(_nftPerLootbox <= 5, "E24");
+            
         }
 
         maxRewardAmount = _maxRewardAmount;
+        
+        rewardPerClass = maxRewardAmount.div(rewardDivisor);
+
+    }
+
+    function updateNFTperLootbox(uint _nftPerLootbox, bool _auth) external onlyAuthorized {
+
+         if (!_auth) {
+           require(_nftPerLootbox <= 5, "E24");            
+        }   
+
         nftPerLootbox = _nftPerLootbox;
+    }
 
-        rewardPerClass = maxRewardAmount.div(nftPerLootbox);
+     function updateRewardDivisor(uint _divisor) external onlyAuthorized {
 
+         rewardDivisor = _divisor;
     }
 
     function changeLootboxDogMax(uint256 _dogroll) external onlyAuthorized {
