@@ -86,7 +86,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         return ERC721URIStorage._burn(tokenId);
     }
     
-    function mint(address _recipient, string memory _uri, uint _nftid) public nonReentrant returns (uint256) {
+    function mint(address _recipient, string memory _uri, uint _nftid) public nonReentrant returns (uint256, bool) {
 
         require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
         require(msg.sender == address(directory.getPacks()), "Minting not allowed outside of the Packs contract");
@@ -103,11 +103,11 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         UserTokenIDtoNFTID[_recipient][newItemId] = _nftid;
 
-        return newItemId; 
+        return (newItemId,true); 
 
     }
 
-    function adminMint(uint256 _nftid) public onlyAuthorized nonReentrant returns (uint256) {
+    function adminMint(uint256 _nftid) public onlyAuthorized nonReentrant returns (uint256, bool) {
 
         require(address(directory.getPacks()) != address(0), "Packs contract address is invalid");
 
@@ -124,7 +124,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         UserTokenIDtoNFTID[_msgSender()][newItemId] = _nftid;
 
-        return newItemId;
+        return (newItemId,true);
 
     }
 
