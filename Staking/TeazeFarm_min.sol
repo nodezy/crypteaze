@@ -16,7 +16,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./SimpBux.sol";
 
 interface ITeazePacks {
-  function premint(address to, uint256 id) external;
+  function premint(address to, uint256 id, bool minttoken) external;
   function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool);
   function mintedCountbyID(uint256 _id) external view returns (uint256);
   function getPackIDbyNFT(uint256 _nftid) external returns (uint256);
@@ -117,12 +117,13 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     uint256 public rewardAmountLimit = 2100000000000000000; //users only get TEAZE rewards on first 2.1B staked to prevent draining rewards pool
     uint256 public minTeazeStake = 25000000000000000; //min stake amount (default 25 million Teaze).
     uint256 public maxTeazeStake = 2100000000000000000; //max stake amount (default 2.1 billion Teaze).
-    uint256 public minLPStake = 250000000000000000; //min lp stake amount (default .25 LP tokens).
-    uint256 public maxLPStake = 21000000000000000000; //max lp stake amount (default 21 LP tokens).
-    uint256 public promoAmount = 200000000000; //amount of SimpBux to give to new stakers (default 200 SimpBux).
+    uint256 public minLPStake = 25000000000000000; //min lp stake amount (default .025 LP tokens).
+    uint256 public maxLPStake = 2100000000000000000; //max lp stake amount (default 2.1 LP tokens).
+    uint256 public promoAmount = 3000000000000; //amount of SimpBux to give to new stakers (default 1000 SimpBux).
     uint256 public stakedDiscount = 30; //amount the price of a pack mint is discounted if the user is staked (default 30%). 
     uint256 public lottoSplit = 50; //amount of split to lotto (default 50%).
     uint256 public lootboxSplit = 50; //amount of split to lootbotx wallet (default 50%).
+    uint256 public unlock; //timestamp for when admin can transfer tokens out of contract (default 1 year)
     
     uint256 public lpalloc = 45; //starting pool allocation for LP side.
     uint256 public stakealloc = 55; //starting pool allocation for Teaze side.
@@ -139,7 +140,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     bool simpCardBonusEnabled = false;
     bool public enableRewardWithdraw = false; //whether SimpBux is withdrawable from this contract (default false).
-    bool public promoActive = false; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
+    bool public promoActive = true; //whether the promotional amount of SimpBux is given out to new stakers (default is True).
     
     event Unstake(address indexed user, uint256 indexed pid);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
@@ -149,13 +150,15 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     constructor(
         SimpBux _simpbux,
         uint256 _startBlock,
-        address _directory
+        address _directory,
+        uint256 _unlock
     ) {
         require(address(_simpbux) != address(0), "E39");
         //require(_startBlock >= block.number, "startBlock is before current block");
         directory = IDirectory(_directory);
         simpbux = _simpbux;
         startBlock = _startBlock;
+        unlock = _unlock;
         addAuthorized(owner());
 
     }
@@ -280,7 +283,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                     userbonus = userbonus.sub(result);
                     userbonus = userbonus.mul(11).div(100);
                 }
-                return (useramount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus).mul(2).div(10);
+                return (useramount.mul(accTeazePerShare).div(1e12).sub(user.rewardDebt)).mul(userbonus).mul(2);
             } else {
                 uint256 result = useramount.mul(100).div(maxTeazeStake.div(2));
                 if(result > 90) {
@@ -463,7 +466,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
                     
                 } else {
 
-                    if (block.timestamp > unstakeTimer[_pid][_msgSender()]) {
+                    if (block.timestamp < unstakeTimer[_pid][_msgSender()]) {
                         unstakerFee = noWaitFee;
                     } else {
                         unstakerFee = unstakeFee;
@@ -548,15 +551,16 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
     // This will allow to rescue ETH sent by mistake directly to the contract
     function rescueETHFromContract() external onlyAuthorized {
+
         address payable _owner = payable(_msgSender());
         _owner.transfer(address(this).balance);
     }
 
     // Function to allow admin to claim *other* ERC20 tokens sent to this contract (by mistake)
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyAuthorized {
-       /* so admin can move out any erc20 mistakenly sent to farm contract EXCEPT Teaze & Teaze LP tokens */
-        //require(_tokenAddr != address(0xcDC477f2ccFf2d8883067c9F23cf489F2B994d00), "Cannot transfer out LP token");
-        //require(_tokenAddr != address(0x4faB740779C73aA3945a5CF6025bF1b0e7F6349C), "Cannot transfer out $Teaze token");
+
+         require(block.timestamp >= unlock, "E88");
+
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
 
@@ -676,7 +680,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
 
             require(mintToken[_msgSender()] > 0, "E62");
             mintToken[_msgSender()] = mintToken[_msgSender()] - 1;
-            ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
+            ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid, true); 
 
         } else { 
 
@@ -686,15 +690,16 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
             
                 IERC20 rewardtoken = IERC20(directory.getSBX()); //SimpBux
                 require(rewardtoken.balanceOf(_msgSender()) >= price, "E63"); 
-                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
+                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid, false);
                 IERC20(rewardtoken).transferFrom(_msgSender(), address(this), price);
+                stakeReward += price;
 
             } else {
 
                 require(userBalance[_msgSender()] >= price, "E64");
-                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
+                ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid, false);
                 userBalance[_msgSender()] = userBalance[_msgSender()].sub(price);
-
+                stakeReward += price;
             }
 
         }       
@@ -718,7 +723,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         require(packMinted < packMintLimit, "E66");
         require(msg.value == price, "E67");
             
-        ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid);
+        ITeazePacks(directory.getPacks()).premint(_msgSender(), _packid, false);
         ITeazePacks(directory.getPacks()).packPurchased(_msgSender(),_packid);
 
         payable(directory.getLotto()).transfer(msg.value.mul(lottoSplit).div(100));
@@ -951,4 +956,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
         adminWallet = _address;
     }
     
+    function updateUnlock(uint _timestamp) external onlyOwner { //remove for production
+        unlock = _timestamp;
+    }
 }
