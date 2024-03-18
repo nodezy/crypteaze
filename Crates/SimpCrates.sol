@@ -286,6 +286,29 @@ contract SimpCrates is Ownable, Authorizable, ReentrancyGuard {
 
     }   
 
+    function checkWalletforDuplicate(address _holder, uint256 _nftid) public view returns (bool nftpresent, uint256 tokenid) {
+
+        address nft = directory.getNFT();
+        uint256 nftbalance = IERC721(nft).balanceOf(_holder);
+
+       
+        for (uint256 y = 0; y < nftbalance; y++) {
+
+            uint usertokenid = ITeazeNFT(nft).tokenOfOwnerByIndex(_holder, y);
+
+            if(_nftid == ITeazeNFT(nft).getUserTokenIDtoNFTID(_holder,usertokenid)) {
+              
+                if(!claimedNFT[usertokenid]) {
+                    return (true, usertokenid);
+                } 
+                
+            } 
+
+        }
+
+        return (false, 0);
+    }
+
    function checkWalletforNFT(uint256 _position, address _holder, uint256 _lootbox) public view returns (bool nftpresent, uint256 tokenid) {
 
         address nft = directory.getNFT();
