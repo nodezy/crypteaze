@@ -18,7 +18,7 @@ interface ITeazeFarm {
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
-    function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256); 
+    function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256,bool); 
     function ownerOf(uint256 tokenId) external view returns (address owner);
     function getApproved(uint256 tokenId) external view returns (address);
     function isApprovedForAll(address owner, address operator) external view returns (bool);
@@ -35,6 +35,7 @@ interface Inserter {
 interface ISimpCrates {
     function checkIfLootbox(address _checker) external;
     function claimedNFT(uint token) external view returns (bool);
+    function checkWalletforDuplicate(address _holder, uint256 _nftid) external view returns (bool nftpresent, uint256 tokenid);
 }
 
 interface IDirectory {
@@ -57,6 +58,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     struct PackInfo { //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchasable, exists
         address packCreatorAddress; //wallet address of the Pack creator
         string collectionName; // Name of nft creator/influencer/artist
+        string genusName; //Name of genus classification
         uint256 packID; //ID of the pack
         uint256 price; //BNB minting price of the NFT Pack
         uint256 priceStep; //how much the price of the NFT should increase in BNB
@@ -99,6 +101,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint256 timeEnding = 2592000; //default pack lifetime of 30 days.
     uint256 nftburnratio = 100;
     uint256 nftburnmultiple = 5;
+    uint256 nftdupethreshold = 15;
      
     constructor(address _directory) {
         directory = IDirectory(_directory);
@@ -110,8 +113,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     receive() external payable {}
+    
 
-    function premint(address _recipient, uint256 _packid) public nonReentrant returns (uint256) {
+    function premint(address _recipient, uint256 _packid, bool _mintToken) public nonReentrant {
 
         randNonce++;
 
@@ -153,19 +157,56 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         }
 
-        uint256 nftid = array[roll];
-        NFTInfo storage nftinfo = nftInfo[nftid];
+        uint _nftid;
+
+        if(_mintToken) {
+            _nftid = array[percentTotal-1]; 
+        } else {
+            _nftid = array[roll];
+        }
+
+        checkMint(_recipient,_packid,_nftid,_mintToken);
+
+    }
+
+    function checkMint(address _recipient, uint _packid, uint _nftid, bool _mintToken) public nonReentrant returns (uint tokenId, bool minted) {
         
-        //update counters
+        bool held;
+        bool burn;
+        uint token;
+        uint burnAmt;       
 
-        NFTmintedCountID[nftid] += 1;
+        NFTInfo storage nftinfo = nftInfo[_nftid];
 
-        PackNFTmints[_packid] += 1;
+        (held,token) = ISimpCrates(directory.getCrates()).checkWalletforDuplicate(_recipient, _nftid);
 
-        ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
+        if(held) {
+           if(nftinfo.mintPercent > nftdupethreshold) {
+                burn = true;
+           }
+        }
 
-        return ITeazeNFT(directory.getNFT()).mint(_recipient, nftinfo.uri, nftid);
+        if (burn && !_mintToken) {
+                
+            burnAmt = getNFTSBXburnAmount(token);
+            
+            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_recipient, getNFTSBXburnAmount(token)); 
+            
+            return (burnAmt,false);
 
+        } else {
+
+            //update counters
+
+            NFTmintedCountID[_nftid] += 1;
+
+            PackNFTmints[_packid] += 1;
+
+            ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
+
+            return ITeazeNFT(directory.getNFT()).mint(_recipient, nftinfo.uri, _nftid);
+        }
+          
     }
 
        //returns the balance of the erc20 token required for validation
@@ -174,7 +215,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return token.balanceOf(_holder);
     }
     
-    function setPackInfo (string memory _collectionName, uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, uint256 _timeend, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
+    function setPackInfo (string memory _collectionName, string memory _genusName,uint256 _price, uint256 _sbxprice, uint256 _priceStep, uint256 _mintLimit, uint256 _timeend, bool _redeemable, bool _purchasable) public onlyWhitelisted returns (uint256) {
         require(whitelisted[_msgSender()], "E06"); 
         require(bytes(_collectionName).length > 0, "E07");
         require(!collections[_collectionName], "E08");
@@ -191,6 +232,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         
         packinfo.packCreatorAddress = _msgSender();
         packinfo.collectionName = _collectionName;
+        packinfo.genusName = _genusName;
         packinfo.packID = _packid;
         packinfo.price = _price;
         packinfo.sbxprice = _sbxprice;
@@ -746,6 +788,10 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function changeDirectory(address _directory) external onlyAuthorized {
         directory = IDirectory(_directory);
+    }
+
+    function changeDupeThreshold(uint _threshold) external onlyAuthorized {
+        nftdupethreshold = _threshold;
     }
 
     //this will probably use a ton of gas
