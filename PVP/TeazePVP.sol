@@ -86,6 +86,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint64 makerRollDelta;
         uint64 takerRollDelta;
         uint64 makerNFTratio;
+        uint64 runnerUpAmount;
         uint128 makerBNBamount;
         uint128 takerBNBamount;
         string winner;
@@ -98,9 +99,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     mapping(uint256 => GameInfo) private gameInfo; 
-    
+    mapping(address => uint) public userGames; //userGames[address];
+    mapping(address => mapping(uint => uint)) public userGameIDs; //userGameIDs[address][x][gameID];
+ 
     uint minBet = 5;
-    uint maxBet= 20;
+    uint maxBet= 50;
 
     uint256 gameFee = 0.0025 ether;
 
@@ -157,6 +160,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), _tokenid);
 
         gameinfo.open = true;
+
+        userGames[_msgSender()]++;
+
+        uint usergames = userGames[_msgSender()];
+
+        userGameIDs[_msgSender()][usergames]= gameid;
     }
 
     function getVulnerability(uint _packid) internal returns (uint) {
@@ -200,6 +209,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint64 makerRollDelta,
         uint64 takerRollDelta,
         uint64 makerNFTratio,
+        uint64 runnerUpAmount,
         uint128 makerBNBamount,
         uint128 takerBNBamount,
         string memory winner,
@@ -230,6 +240,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             makerRollDelta,
             takerRollDelta,
             makerNFTratio,
+            runnerUpAmount,
             makerBNBamount,
             takerBNBamount,
             winner,
@@ -296,6 +307,18 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     //function acceptPVP
 
+        //-validate NFT delta
+        //-validate bnb amount
+        //-get roll
+        //-get vulnerability
+        //-get results
+        //-send loser SBX
+        //-save results in struct
+        //-save results in mappings
+        //-transfer NFTs
+        //-send winner NFT + BNB minus fees
+
+
     function getPVPNFTinfo(uint _tokenID) public view returns (uint, uint, uint, uint, string memory) {
 
         address packs = directory.getPacks();
@@ -350,4 +373,75 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function changeRunnerUpAmount(uint _SBXamount) external onlyAuthorized {
         loserSBXamount = _SBXamount;
     }
+
+    function getAllUserGames(address _user) public view returns (uint, uint[] memory) {
+
+        uint games = userGames[_user];
+
+        uint[] memory gameids = new uint[](games);
+
+        for(uint x=1;x<=games;x++) {
+
+            gameids[x] = userGameIDs[_user][x];
+
+        }
+
+        return(games, gameids);
+    }
+
+    function getUserOpenGames(address _user) external view returns (uint[] memory) {
+
+        (uint games, uint[] memory gameids) = getAllUserGames(_user);
+
+        uint[] memory opengameids = new uint[](games);
+
+        uint count;
+
+        for(uint x=1;x<=games;x++) {
+
+            GameInfo storage gameinfo = gameInfo[gameids[x]];
+
+            if(gameinfo.open) {
+
+                opengameids[count] = userGameIDs[_user][x];
+
+                count++;
+
+            }
+
+        }
+
+        return opengameids;
+
+    }
+
+    function getUserClosedGames(address _user) external view returns (uint[] memory) {
+
+        (uint games, uint[] memory gameids) = getAllUserGames(_user);
+
+        uint[] memory closedgameids = new uint[](games);
+
+        uint count;
+
+        for(uint x=1;x<=games;x++) {
+
+            GameInfo storage gameinfo = gameInfo[gameids[x]];
+
+            if(!gameinfo.open) {
+
+                closedgameids[count] = userGameIDs[_user][x];
+
+                count++;
+
+            }
+
+        }
+
+        return closedgameids;
+
+    }
+
+    //function getAllOpenGames()
+
+    //function getAllClosedGames()
 }
