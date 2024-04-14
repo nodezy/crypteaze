@@ -75,8 +75,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint16 takerTokenID; 
         uint8 makerNFTPack;  
         uint8 takerNFTPack;  
-        uint8 makerNFTrarity;  
-        uint8 takerNFTrarity; 
+        uint8 makerNFTID;  
+        uint8 takerNFTID; 
         uint8 makerVulnerable;  
         uint8 takerVulnerable; 
         uint64 timeStart;
@@ -99,8 +99,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     mapping(uint256 => GameInfo) private gameInfo; 
     
-    uint minBet = 1;
-    uint maxBet= 100;
+    uint minBet = 5;
+    uint maxBet= 20;
+
+    uint256 gameFee = 0.0025 ether;
+
+    uint loserSBXamount = 200000000000;
   
     IDirectory public directory;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
@@ -122,8 +126,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function openPVP(uint _tokenid, uint _betamount) public payable nonReentrant {
         require(_betamount == msg.value, "E89");
 
-        //add function view function to always get bnb amounts from oracle for min/max values
-        uint usdamount = IOracle(directory.getOracle()).getbnbusdequivalent(msg.value);
+        uint usdamount = getOracleAmounts(msg.value);
         require(usdamount >= minBet && usdamount <= maxBet, "E90");
 
         randNonce++;
@@ -134,10 +137,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         GameInfo storage gameinfo = gameInfo[gameid];
 
-        address packs = directory.getPacks();
-
-        uint nftid = ITeazePacks(packs).getNFTIDwithToken(_tokenid);
-        uint packid = uint8(ITeazePacks(packs).getPackIDbyNFT(nftid));
+        (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
         uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 100); //get user roll 0-99
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 15); //get vulnerability roll 0-14
@@ -145,11 +145,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameinfo.makerAddress = _msgSender();
         gameinfo.makerBNBamount = uint128(msg.value);
         gameinfo.makerNFTPack = uint8(packid);
-        gameinfo.makerNFTrarity = uint8(ITeazePacks(packs).getNFTPercent(nftid));
+        gameinfo.makerNFTID = uint8(nftid);
         gameinfo.makerRoll = uint64(roll++);
         gameinfo.makerRollDelta = uint64(vulnerabilityroll++); //get random roll between 1-15 
         gameinfo.makerTokenID = uint16(_tokenid);
-        gameinfo.makerNFTratio = uint64(ITeazePacks(packs).getNFTClass(nftid));
+        gameinfo.makerNFTratio = uint64(mintClass);
         gameinfo.makerVulnerable = uint8(getVulnerability(packid)); 
         gameinfo.timeStart = uint64(block.timestamp);
         gameinfo.timeEnds = uint64(block.timestamp.add(timeEnding));
@@ -159,7 +159,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameinfo.open = true;
     }
 
-    function getVulnerability(uint _packid) internal view returns (uint) {
+    function getVulnerability(uint _packid) internal returns (uint) {
 
         uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
 
@@ -168,6 +168,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         genusroll++; //Normalize cause there's no zero pack
 
         if(_packid == genusroll) {
+
+            randNonce++;
 
             getVulnerability(_packid);
 
@@ -187,8 +189,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint16 takerTokenID, 
         uint8 makerNFTPack,  
         uint8 takerNFTPack,  
-        uint8 makerNFTrarity,  
-        uint8 takerNFTrarity, 
+        uint8 makerNFTID,  
+        uint8 takerNFTID, 
         uint8 makerVulnerable,  
         uint8 takerVulnerable, 
         uint64 timeStart,
@@ -217,8 +219,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             takerTokenID, 
             makerNFTPack,  
             takerNFTPack,  
-            makerNFTrarity,  
-            takerNFTrarity, 
+            makerNFTID,  
+            takerNFTID, 
             makerVulnerable,  
             takerVulnerable, 
             timeStart,
@@ -240,7 +242,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         address makerAddress, 
         uint16 makerTokenID, 
         uint8 makerNFTPack,  
-        uint8 makerNFTrarity,  
+        uint8 makerNFTID,  
         uint64 timeStart,
         uint64 timeEnds,
         uint64 makerNFTratio,
@@ -258,7 +260,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             makerAddress, 
             makerTokenID, 
             makerNFTPack,  
-            makerNFTrarity,    
+            makerNFTID,    
             timeStart,
             timeEnds,
             makerNFTratio,
@@ -272,27 +274,60 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         GameInfo storage gameinfo = gameInfo[_gameId];
 
-        if(gameinfo.makerNFTrarity == _mintClass) {
+        if(gameinfo.makerNFTratio == _mintClass) {
             return gameinfo.makerBNBamount;
         }
 
-        if(gameinfo.makerNFTrarity > _mintClass) {
-           return uint(gameinfo.makerNFTrarity).sub(_mintClass).mul(gameinfo.makerBNBamount);
+        if(gameinfo.makerNFTratio > _mintClass) {
+           return uint(gameinfo.makerNFTratio).sub(_mintClass).mul(gameinfo.makerBNBamount);
         }
 
-        if(gameinfo.makerNFTrarity < _mintClass) {
-           return uint(_mintClass).sub(gameinfo.makerNFTrarity).mul(gameinfo.makerBNBamount);
+        if(gameinfo.makerNFTratio < _mintClass) {
+           return uint(_mintClass).sub(gameinfo.makerNFTratio).mul(gameinfo.makerBNBamount);
         }
 
     }
 
-    //function getOracleAmounts
+    function getOracleAmounts(uint _bnbamount) public view returns (uint amountusd) {
+        uint usdamount = IOracle(directory.getOracle()).getbnbusdequivalent(_bnbamount);
+        return usdamount;
+    }
+
 
     //function acceptPVP
 
-    //function getNFTinfo
+    function getPVPNFTinfo(uint _tokenID) public view returns (uint, uint, uint, uint, string memory) {
 
-    //function delistPVP 
+        address packs = directory.getPacks();
+
+        uint nftid = ITeazePacks(packs).getNFTIDwithToken(_tokenID);
+        uint packid = ITeazePacks(packs).getPackIDbyNFT(nftid);
+        uint mintPercent = ITeazePacks(packs).getNFTPercent(nftid);
+        uint mintClass = ITeazePacks(packs).getNFTClass(nftid);
+
+        string memory genus = ITeazePacks(packs).getGenus(packid);
+
+        return(nftid, packid, mintPercent, mintClass, genus);
+    }
+
+    function delistPVP(uint _gameId) external nonReentrant {
+        GameInfo storage gameinfo = gameInfo[_gameId];
+
+        if (gameinfo.open) {
+            require(gameinfo.makerAddress == _msgSender(), "E90");
+        } else {
+            return;
+        }
+
+        require(block.timestamp >= gameinfo.timeEnds, "E96");
+
+        gameinfo.open = false;
+        gameinfo.winner = "Expired";
+
+        payable(_msgSender()).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
+        IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gameinfo.makerTokenID);
+        
+    }
 
     function changeMinMaxBet(uint _min, uint _max) external onlyAuthorized {
         require(_min < _max, "E92");
@@ -306,5 +341,13 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(_timeEnd > 86400, "E94");
 
         timeEnding = _timeEnd;
+    }
+
+    function changeGameFee(uint _feeAmount) external onlyAuthorized {
+        gameFee = _feeAmount;
+    }
+
+    function changeRunnerUpAmount(uint _SBXamount) external onlyAuthorized {
+        loserSBXamount = _SBXamount;
     }
 }
