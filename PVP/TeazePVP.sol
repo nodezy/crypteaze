@@ -58,6 +58,11 @@ interface IDirectory {
     function getPacks() external view returns (address);
     function getInserter() external view returns (address);
     function getOracle() external view returns (address);
+    function getCrates() external view returns (address);
+}
+
+interface ISimpCrates {
+    function claimedNFT(uint token) external view returns (bool);
 }
 
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
@@ -138,6 +143,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function openPVP(uint _tokenid) public payable nonReentrant {
 
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
         
         uint usdamount = getOracleAmounts(msg.value);
         require(usdamount >= minBet && usdamount <= maxBet, "E90");
@@ -183,6 +189,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     function acceptPVP(uint _tokenid, uint _gameid) external payable nonReentrant {
 
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
         
         uint usdamount = getOracleAmounts(msg.value);
         require(usdamount >= minBet && usdamount <= maxBet, "E90");
@@ -312,23 +319,39 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         GameInfo storage gameinfo = gameInfo[_gameId];
 
-        if (gameinfo.open && !authorized[_msgSender()]) {
-            require(gameinfo.makerAddress == _msgSender(), "E90");
-        }
+        if (authorized[_msgSender()] || gameinfo.makerAddress == _msgSender()) {
+            
+            return (
+                gameinfo.makerAddress, 
+                gameinfo.makerTokenID, 
+                gameinfo.makerNFTPack,  
+                gameinfo.makerNFTID,  
+                gameinfo.makerVulnerable,
+                gameinfo.makerRoll,
+                gameinfo.makerRollDelta,
+                gameinfo.timeStart,
+                gameinfo.makerNFTratio,
+                gameinfo.makerBNBamount,
+                gameinfo.open
+            );
 
-        return (
-            gameinfo.makerAddress, 
-            gameinfo.makerTokenID, 
-            gameinfo.makerNFTPack,  
-            gameinfo.makerNFTID,  
-            gameinfo.makerVulnerable,
-            gameinfo.makerRoll,
-            gameinfo.makerRollDelta,
-            gameinfo.timeStart,
-            gameinfo.makerNFTratio,
-            gameinfo.makerBNBamount,
-            gameinfo.open
-        );
+        } else {
+
+            return (
+                gameinfo.makerAddress, 
+                gameinfo.makerTokenID, 
+                gameinfo.makerNFTPack,  
+                gameinfo.makerNFTID,  
+                0,
+                0,
+                0,
+                gameinfo.timeStart,
+                gameinfo.makerNFTratio,
+                gameinfo.makerBNBamount,
+                gameinfo.open
+            );
+
+        }     
 
     }
 
