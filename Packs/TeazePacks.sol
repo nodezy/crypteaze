@@ -53,8 +53,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     Counters.Counter public _PackIds; //so we can track which Packs have been added to the system
     Counters.Counter public _NFTIds; //so we can track which NFT's have been added to the Packs
-    Counters.Counter public _LootBoxIds; //so we can track amount of lootboxes in creation
-    
+        
     struct PackInfo { //creator, name, id, price, priceStep, sbxprice, mintLimit, reedeemable, purchasable, exists
         address packCreatorAddress; //wallet address of the Pack creator
         string collectionName; // Name of nft creator/influencer/artist
@@ -84,8 +83,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping (string => bool) private collections; //Whether the collection name exists or not.
     mapping (string => bool) private nftnames; //Whether the collection name exists or not.
     mapping (uint => bool) private packs; //Whether the packID exists or not.
-    mapping(uint256 => PackInfo) public packInfo; // Info of each NFT artist/infuencer wallet.
-    mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT artist/infuencer wallet.
+    mapping(uint256 => PackInfo) public packInfo; // Info of each Pack  
+    mapping(uint256 => NFTInfo) public nftInfo; // Info of each NFT  
 
     mapping(uint => uint256[]) public PackNFTids; // array of NFT ID's listed under each pack.
     
@@ -198,9 +197,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
             //update counters
 
-            NFTmintedCountID[_nftid] += 1;
+            NFTmintedCountID[_nftid] ++;
 
-            PackNFTmints[_packid] += 1;
+            PackNFTmints[_packid] ++;
 
             ISimpCrates(directory.getCrates()).checkIfLootbox(_recipient);
 
@@ -794,55 +793,32 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         nftdupethreshold = _threshold;
     }
 
-    //this will probably use a ton of gas
-    function burnAllFromPack(uint _packID) external nonReentrant {
-
-        address farm = directory.getFarm();
-        address nft = directory.getNFT();
-
-        require(ITeazeFarm(farm).getUserStaked(_msgSender()), "E35");
-       
-        //check for approval
-        require(ITeazeNFT(nft).isApprovedForAll(address(_msgSender()),address(this)), "E86");
-
-        //make sure pack exists
-        require(packs[_packID], "E14");
-
-        //get all nftids for this pack
-        uint packlength = PackNFTids[_packID].length;
-
-        uint256[] memory ids = new uint256[](packlength);
-
-        (ids,,) = getAllNFTbyPack(_packID);
-
-        
-        //get user wallet NFT balance
-        //Loop through user wallet
-        uint userbalance = ITeazeNFT(nft).balanceOf(_msgSender());
-
-        if (userbalance > 0) {
-
-            for (uint256 x = userbalance; x > 0; x--) {
-                for (uint256 y = 0; y < ids.length; y++) {
-                    if(ids[y] == getIDbyURI(ITeazeNFT(nft).tokenURI(ITeazeNFT(nft).tokenOfOwnerByIndex(_msgSender(), x-1)))) {
-                        
-                        ITeazeFarm(farm).increaseSBXBalance(_msgSender(), getNFTSBXburnAmount(ids[y])); 
-                        IERC721(nft).safeTransferFrom(_msgSender(), DEAD, ITeazeNFT(nft).tokenOfOwnerByIndex(_msgSender(), x-1));
-
-                        break;
-                        
-                    }
-
-                }
-
-            }
-
-        } else {
-            return;
-        }
-
+    function getTotalPacks() public view returns (uint) {
+        return _PackIds.current();
     }
 
+    function getAllGenus() public view returns (uint, string[] memory) {
+
+        uint256 _packids = _PackIds.current();
+
+        string[] memory genusNames = new string[](_packids);
+
+        for(uint x=1;x<=_packids;x++) {
+
+            PackInfo storage packinfo = packInfo[x];
+
+            genusNames[x] = packinfo.genusName;
+
+        }
+
+        return(_packids, genusNames);
+    }
+
+    function getGenus(uint _packid) public view returns (string memory) {
+        PackInfo storage packinfo = packInfo[_packid];
+
+        return packinfo.genusName;
+    }
 
 }
 
