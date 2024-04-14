@@ -26,6 +26,11 @@ interface ITeazeNFT {
     function setApprovalForAll(address operator, bool status) external;
 }
 
+interface IOracle {
+    function getTeazeUSDPrice() external view returns (uint256, uint256, uint256);
+    function getbnbusdequivalent(uint256 amount) external view returns (uint256);
+}
+
 interface Inserter {
     function makeActive() external; 
     function getNonce() external view returns (uint256);
@@ -43,6 +48,9 @@ interface ITeazePacks {
     function getPackTimelimitCrates(uint256 _nftid) external view returns (bool);
     function getNFTExists(uint256 _nftid) external view returns (bool);
     function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
+    function getTotalPacks() external view returns (uint);
+    function getGenus(uint _packid) external view returns (string memory);
+    function getAllGenus() external view returns (uint, string[] memory);
 }
 
 interface IDirectory {
@@ -50,7 +58,7 @@ interface IDirectory {
     function getNFT() external view returns (address);
     function getPacks() external view returns (address);
     function getInserter() external view returns (address);
-    
+    function getOracle() external view returns (address);
 }
 
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
@@ -90,9 +98,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     }
 
     mapping(uint256 => GameInfo) private gameInfo; 
-    mapping(uint256=> GenusInfo) public genusInfo;
-
-    uint NFTdelta;
+    
     uint minBet = 1;
     uint maxBet= 100;
   
@@ -100,7 +106,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
-    uint256 timeEnding = 1296000; //default bet lifetime of 15 days.
+    uint256 timeEnding = 1296000; //default game lifetime of 15 days.
     
      
     constructor(address _directory) {
@@ -113,10 +119,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     receive() external payable {}
 
-
     function openPVP(uint _tokenid, uint _betamount) public payable nonReentrant {
         require(_betamount == msg.value, "E89");
-        require(msg.value >= minBet && msg.value <= maxBet, "E90");
+
+        //add function view function to always get bnb amounts from oracle for min/max values
+        uint usdamount = IOracle(directory.getOracle()).getbnbusdequivalent(msg.value);
+        require(usdamount >= minBet && usdamount <= maxBet, "E90");
 
         randNonce++;
 
@@ -129,19 +137,20 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         address packs = directory.getPacks();
 
         uint nftid = ITeazePacks(packs).getNFTIDwithToken(_tokenid);
+        uint packid = uint8(ITeazePacks(packs).getPackIDbyNFT(nftid));
 
         uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 100); //get user roll 0-99
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 15); //get vulnerability roll 0-14
 
         gameinfo.makerAddress = _msgSender();
         gameinfo.makerBNBamount = uint128(msg.value);
-        gameinfo.makerNFTPack = uint8(ITeazePacks(packs).getPackIDbyNFT(nftid));
+        gameinfo.makerNFTPack = uint8(packid);
         gameinfo.makerNFTrarity = uint8(ITeazePacks(packs).getNFTPercent(nftid));
         gameinfo.makerRoll = uint64(roll++);
         gameinfo.makerRollDelta = uint64(vulnerabilityroll++); //get random roll between 1-15 
         gameinfo.makerTokenID = uint16(_tokenid);
-        gameinfo.makerNFTratio = 0; 
-        gameinfo.makerVulnerable = 0; //write view function to return a random vulnerability
+        gameinfo.makerNFTratio = uint64(ITeazePacks(packs).getNFTClass(nftid));
+        gameinfo.makerVulnerable = uint8(getVulnerability(packid)); 
         gameinfo.timeStart = uint64(block.timestamp);
         gameinfo.timeEnds = uint64(block.timestamp.add(timeEnding));
 
@@ -150,19 +159,152 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameinfo.open = true;
     }
 
-    //function acceptPVP
+    function getVulnerability(uint _packid) internal view returns (uint) {
 
-    //function getNFTdelta
+        uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
+
+        uint256 genusroll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, packs); //get random pack
+
+        genusroll++; //Normalize cause there's no zero pack
+
+        if(_packid == genusroll) {
+
+            getVulnerability(_packid);
+
+        } else {
+
+            return genusroll;
+        }
+
+        return 0;
+
+    }
+
+    function viewPVP(uint _gameId) external view returns (
+        address makerAddress, 
+        address takerAddress,  
+        uint16 makerTokenID, 
+        uint16 takerTokenID, 
+        uint8 makerNFTPack,  
+        uint8 takerNFTPack,  
+        uint8 makerNFTrarity,  
+        uint8 takerNFTrarity, 
+        uint8 makerVulnerable,  
+        uint8 takerVulnerable, 
+        uint64 timeStart,
+        uint64 timeEnds,
+        uint64 makerRoll,
+        uint64 takerRoll,
+        uint64 makerRollDelta,
+        uint64 takerRollDelta,
+        uint64 makerNFTratio,
+        uint128 makerBNBamount,
+        uint128 takerBNBamount,
+        string memory winner,
+        bool open
+    ) {
+
+        GameInfo storage gameinfo = gameInfo[_gameId];
+
+        if (gameinfo.open) {
+            require(gameinfo.makerAddress == _msgSender(), "E90");
+        }
+
+        return (
+            makerAddress, 
+            takerAddress,  
+            makerTokenID, 
+            takerTokenID, 
+            makerNFTPack,  
+            takerNFTPack,  
+            makerNFTrarity,  
+            takerNFTrarity, 
+            makerVulnerable,  
+            takerVulnerable, 
+            timeStart,
+            timeEnds,
+            makerRoll,
+            takerRoll,
+            makerRollDelta,
+            takerRollDelta,
+            makerNFTratio,
+            makerBNBamount,
+            takerBNBamount,
+            winner,
+            open
+        );
+
+    }
+
+    function viewGame(uint _gameId) external view returns (
+        address makerAddress, 
+        uint16 makerTokenID, 
+        uint8 makerNFTPack,  
+        uint8 makerNFTrarity,  
+        uint64 timeStart,
+        uint64 timeEnds,
+        uint64 makerNFTratio,
+        uint128 makerBNBamount,
+        bool open
+    ) {
+
+        GameInfo storage gameinfo = gameInfo[_gameId];
+
+        if (!gameinfo.open) {
+            revert("E91");
+        }
+
+        return (
+            makerAddress, 
+            makerTokenID, 
+            makerNFTPack,  
+            makerNFTrarity,    
+            timeStart,
+            timeEnds,
+            makerNFTratio,
+            makerBNBamount,
+            open
+        );
+
+    }
+
+    function getNFTdelta(uint _mintClass, uint _gameId) external view returns (uint amount) {
+
+        GameInfo storage gameinfo = gameInfo[_gameId];
+
+        if(gameinfo.makerNFTrarity == _mintClass) {
+            return gameinfo.makerBNBamount;
+        }
+
+        if(gameinfo.makerNFTrarity > _mintClass) {
+           return uint(gameinfo.makerNFTrarity).sub(_mintClass).mul(gameinfo.makerBNBamount);
+        }
+
+        if(gameinfo.makerNFTrarity < _mintClass) {
+           return uint(_mintClass).sub(gameinfo.makerNFTrarity).mul(gameinfo.makerBNBamount);
+        }
+
+    }
+
+    //function getOracleAmounts
+
+    //function acceptPVP
 
     //function getNFTinfo
 
-    //function closePVP
+    //function delistPVP 
 
-    //function getAllGenus
+    function changeMinMaxBet(uint _min, uint _max) external onlyAuthorized {
+        require(_min < _max, "E92");
+        require(_min > 0, "E93");
 
-    //functio getVulnerability
+        minBet = _min;
+        maxBet = _max;
+    }
 
-    //function changeMinMaxBet
+    function changeTimeEnding(uint _timeEnd) external onlyAuthorized {
+        require(_timeEnd > 86400, "E94");
 
-    //function changeTimeEnding
+        timeEnding = _timeEnd;
+    }
 }
