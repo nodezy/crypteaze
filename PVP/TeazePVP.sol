@@ -67,40 +67,46 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     Counters.Counter public _GameIds;
+    Counters.Counter public _openGames;  
+    Counters.Counter public _closedGames;  
+    Counters.Counter public _expiredGames; 
 
     struct GameInfo { 
         address makerAddress; 
-        address takerAddress;  
         uint16 makerTokenID; 
-        uint16 takerTokenID; 
         uint8 makerNFTPack;  
-        uint8 takerNFTPack;  
         uint8 makerNFTID;  
-        uint8 takerNFTID; 
-        uint8 makerVulnerable;  
-        uint8 takerVulnerable; 
-        uint64 timeStart;
-        uint64 timeEnds;
+        uint8 makerVulnerable;
         uint64 makerRoll;
-        uint64 takerRoll;
         uint64 makerRollDelta;
-        uint64 takerRollDelta;
+        uint64 timeStart;
         uint64 makerNFTratio;
-        uint64 runnerUpAmount;
         uint128 makerBNBamount;
-        uint128 takerBNBamount;
-        string winner;
         bool open; 
     }
 
-    struct GenusInfo {
-        uint8 packID;
-        string genusName;
+    struct GameResult {
+        address takerAddress;  
+        uint16 takerTokenID; 
+        uint8 takerNFTPack;  
+        uint8 takerVulnerable; 
+        uint8 takerNFTID; 
+        uint64 timeEnds;
+        uint64 takerRoll;
+        uint64 takerRollDelta;
+        uint64 runnerUpAmount;
+        uint128 takerBNBamount;
+        string winner;
     }
 
     mapping(uint256 => GameInfo) private gameInfo; 
+    mapping(uint256 => GameResult) private gameResult; 
     mapping(address => uint) public userGames; //userGames[address];
     mapping(address => mapping(uint => uint)) public userGameIDs; //userGameIDs[address][x][gameID];
+
+    uint256[] private opengamearray;  
+    uint256[] private closedgamearray;  
+    uint256[] private expiredgamearray;  
  
     uint minBet = 5;
     uint maxBet= 50;
@@ -126,9 +132,10 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     receive() external payable {}
 
-    function openPVP(uint _tokenid, uint _betamount) public payable nonReentrant {
-        require(_betamount == msg.value, "E89");
+    function openPVP(uint _tokenid) public payable nonReentrant {
 
+        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        
         uint usdamount = getOracleAmounts(msg.value);
         require(usdamount >= minBet && usdamount <= maxBet, "E90");
 
@@ -155,7 +162,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameinfo.makerNFTratio = uint64(mintClass);
         gameinfo.makerVulnerable = uint8(getVulnerability(packid)); 
         gameinfo.timeStart = uint64(block.timestamp);
-        gameinfo.timeEnds = uint64(block.timestamp.add(timeEnding));
+        //gameinfo.timeEnds = uint64(block.timestamp.add(timeEnding));
 
         IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), _tokenid);
 
@@ -166,6 +173,96 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint usergames = userGames[_msgSender()];
 
         userGameIDs[_msgSender()][usergames]= gameid;
+
+        opengamearray.push(gameid);
+    }
+
+    function acceptPVP(uint _tokenid, uint _gameid) external payable nonReentrant {
+
+        require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
+        
+        uint usdamount = getOracleAmounts(msg.value);
+        require(usdamount >= minBet && usdamount <= maxBet, "E90");
+
+        GameInfo storage gameinfo = gameInfo[_gameid];
+        GameResult storage gameresult = gameResult[_gameid];
+
+        (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
+
+        require(msg.value == getNFTdelta(mintClass, _gameid), "E89");
+
+        randNonce++;
+
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 100); //get user roll 0-99
+        uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 15); //get vulnerability roll 0-14
+
+        gameresult.takerAddress = _msgSender();
+        gameresult.takerBNBamount = uint128(msg.value);
+        gameresult.takerNFTPack = uint8(packid);
+        gameresult.takerNFTID = uint8(nftid);
+        gameresult.takerRoll = uint64(roll++);
+        gameresult.takerRollDelta = uint64(vulnerabilityroll++); //get random roll between 1-15 
+        gameresult.takerTokenID = uint16(_tokenid);
+        gameresult.takerVulnerable = uint8(getVulnerability(packid)); 
+
+        uint makerTempRoll;
+        uint takerTempRoll;
+
+        if(gameinfo.makerNFTPack == gameresult.takerVulnerable) {
+            takerTempRoll = uint(gameresult.takerRoll).sub(gameresult.takerRollDelta);
+        } else {
+            takerTempRoll = gameresult.takerRoll;
+        }
+
+        if(gameresult.takerNFTPack == gameinfo.makerVulnerable) {
+            makerTempRoll = uint(gameinfo.makerRoll).sub(gameinfo.makerRollDelta);
+        } else {
+            makerTempRoll = gameinfo.makerRoll;
+        }
+
+        if(makerTempRoll == takerTempRoll) { //tie
+
+            gameresult.winner = "Tie";
+
+            payable(gameinfo.makerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameinfo.makerAddress, gameinfo.makerTokenID);
+
+            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+
+        } 
+        
+        if(makerTempRoll > takerTempRoll) { //maker wins
+
+            gameresult.winner = "Maker";
+
+            payable(gameinfo.makerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameinfo.makerAddress, gameinfo.makerTokenID);
+
+            payable(gameinfo.makerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, gameinfo.makerAddress, gameresult.takerTokenID);
+
+        } 
+
+        if(makerTempRoll < takerTempRoll) { //taker wins
+
+            gameresult.winner = "Taker";
+
+            payable(gameresult.takerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameresult.takerAddress, gameinfo.makerTokenID);
+
+            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+
+        } 
+
+        userGames[_msgSender()]++;
+
+        uint usergames = userGames[_msgSender()];
+
+        userGameIDs[_msgSender()][usergames]= _gameid;
+
+        gameinfo.open = false;
+        closeGame(_gameid, true);
+        
     }
 
     function getVulnerability(uint _packid) internal returns (uint) {
@@ -191,97 +288,75 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     }
 
-    function viewPVP(uint _gameId) external view returns (
+    function viewGameInfo(uint _gameId) external view returns (
         address makerAddress, 
-        address takerAddress,  
         uint16 makerTokenID, 
-        uint16 takerTokenID, 
         uint8 makerNFTPack,  
-        uint8 takerNFTPack,  
         uint8 makerNFTID,  
-        uint8 takerNFTID, 
-        uint8 makerVulnerable,  
-        uint8 takerVulnerable, 
-        uint64 timeStart,
-        uint64 timeEnds,
+        uint8 makerVulnerable,
         uint64 makerRoll,
-        uint64 takerRoll,
         uint64 makerRollDelta,
-        uint64 takerRollDelta,
+        uint64 timeStart,
         uint64 makerNFTratio,
-        uint64 runnerUpAmount,
         uint128 makerBNBamount,
-        uint128 takerBNBamount,
-        string memory winner,
         bool open
     ) {
 
         GameInfo storage gameinfo = gameInfo[_gameId];
 
-        if (gameinfo.open) {
+        if (gameinfo.open && !authorized[_msgSender()]) {
             require(gameinfo.makerAddress == _msgSender(), "E90");
         }
 
         return (
-            makerAddress, 
-            takerAddress,  
-            makerTokenID, 
-            takerTokenID, 
-            makerNFTPack,  
-            takerNFTPack,  
-            makerNFTID,  
-            takerNFTID, 
-            makerVulnerable,  
-            takerVulnerable, 
-            timeStart,
-            timeEnds,
-            makerRoll,
-            takerRoll,
-            makerRollDelta,
-            takerRollDelta,
-            makerNFTratio,
-            runnerUpAmount,
-            makerBNBamount,
-            takerBNBamount,
-            winner,
-            open
+            gameinfo.makerAddress, 
+            gameinfo.makerTokenID, 
+            gameinfo.makerNFTPack,  
+            gameinfo.makerNFTID,  
+            gameinfo.makerVulnerable,
+            gameinfo.makerRoll,
+            gameinfo.makerRollDelta,
+            gameinfo.timeStart,
+            gameinfo.makerNFTratio,
+            gameinfo.makerBNBamount,
+            gameinfo.open
         );
 
     }
 
-    function viewGame(uint _gameId) external view returns (
-        address makerAddress, 
-        uint16 makerTokenID, 
-        uint8 makerNFTPack,  
-        uint8 makerNFTID,  
-        uint64 timeStart,
+    function viewGameResult(uint _gameId) external view returns (
+        address takerAddress,  
+        uint16 takerTokenID, 
+        uint8 takerNFTPack,  
+        uint8 takerVulnerable, 
+        uint8 takerNFTID, 
         uint64 timeEnds,
-        uint64 makerNFTratio,
-        uint128 makerBNBamount,
-        bool open
+        uint64 takerRoll,
+        uint64 takerRollDelta,
+        uint64 runnerUpAmount,
+        uint128 takerBNBamount,
+        string memory winner
     ) {
 
-        GameInfo storage gameinfo = gameInfo[_gameId];
-
-        if (!gameinfo.open) {
-            revert("E91");
-        }
+        GameResult storage gameresult = gameResult[_gameId];
 
         return (
-            makerAddress, 
-            makerTokenID, 
-            makerNFTPack,  
-            makerNFTID,    
-            timeStart,
-            timeEnds,
-            makerNFTratio,
-            makerBNBamount,
-            open
+            gameresult.takerAddress,  
+            gameresult.takerTokenID, 
+            gameresult.takerNFTPack,  
+            gameresult.takerVulnerable, 
+            gameresult.takerNFTID, 
+            gameresult.timeEnds,
+            gameresult.takerRoll,
+            gameresult.takerRollDelta,
+            gameresult.runnerUpAmount,
+            gameresult.takerBNBamount,
+            gameresult.winner
         );
 
     }
 
-    function getNFTdelta(uint _mintClass, uint _gameId) external view returns (uint amount) {
+    function getNFTdelta(uint _mintClass, uint _gameId) internal view returns (uint amount) {
 
         GameInfo storage gameinfo = gameInfo[_gameId];
 
@@ -304,21 +379,6 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         return usdamount;
     }
 
-
-    //function acceptPVP
-
-        //-validate NFT delta
-        //-validate bnb amount
-        //-get roll
-        //-get vulnerability
-        //-get results
-        //-send loser SBX
-        //-save results in struct
-        //-save results in mappings
-        //-transfer NFTs
-        //-send winner NFT + BNB minus fees
-
-
     function getPVPNFTinfo(uint _tokenID) public view returns (uint, uint, uint, uint, string memory) {
 
         address packs = directory.getPacks();
@@ -335,6 +395,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function delistPVP(uint _gameId) external nonReentrant {
         GameInfo storage gameinfo = gameInfo[_gameId];
+        GameResult storage gameresult = gameResult[_gameId];
 
         if (gameinfo.open) {
             require(gameinfo.makerAddress == _msgSender(), "E90");
@@ -342,13 +403,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             return;
         }
 
-        require(block.timestamp >= gameinfo.timeEnds, "E96");
+        require(block.timestamp >= uint(gameinfo.timeStart).add(timeEnding), "E96");
 
         gameinfo.open = false;
-        gameinfo.winner = "Expired";
+        gameresult.winner = "Expired";
 
         payable(_msgSender()).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
         IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gameinfo.makerTokenID);
+
+        closeGame(_gameId, false);
         
     }
 
@@ -441,7 +504,70 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     }
 
-    //function getAllOpenGames()
+    function closeGame(uint256 _gameId, bool status) internal { //change to internal for production
+        uint arraylength = opengamearray.length;
 
-    //function getAllClosedGames()
+        //Remove open game from active array
+        for(uint x = 0; x < arraylength; x++) {
+            if (opengamearray[x] == _gameId) {
+                opengamearray[x] = opengamearray[arraylength-1];
+                opengamearray.pop();
+
+                if(_openGames.current() > 0) {
+                    _openGames.decrement();
+                }
+
+                //Add open game to closed (true) or expired (false) array
+
+                if (status) {
+ 
+                    closedgamearray.push(_gameId);
+
+                    _closedGames.increment();
+
+                } else {
+
+                    expiredgamearray.push(_gameId);
+
+                    _expiredGames.increment();
+
+                }
+              
+                return;
+            }
+        }       
+
+    }
+
+    function viewopenGames() external view returns (uint256[] memory lootboxes){
+
+        return opengamearray;
+
+    }
+
+    function viewClosedGames(uint _startingpoint, uint _length) external view returns (uint256[] memory) {
+
+        uint256[] memory array = new uint256[](_length); 
+
+        //Loop through the segment at the starting point
+        for(uint x = 0; x < _length; x++) {
+          array[x] = closedgamearray[_startingpoint.add(x)];
+        }   
+
+        return array;
+
+    }
+
+        function viewExpiredGames(uint _startingpoint, uint _length) external view returns (uint256[] memory) {
+
+        uint256[] memory array = new uint256[](_length); 
+
+        //Loop through the segment at the starting point
+        for(uint x = 0; x < _length; x++) {
+          array[x] = expiredgamearray[_startingpoint.add(x)];
+        }   
+
+        return array;
+
+    }
 }
