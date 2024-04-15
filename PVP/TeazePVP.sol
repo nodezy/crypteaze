@@ -592,10 +592,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         }   
 
         return array;
-
     }
 
-        function viewExpiredGames(uint _startingpoint, uint _length) external view returns (uint256[] memory) {
+    function viewExpiredGames(uint _startingpoint, uint _length) external view returns (uint256[] memory) {
 
         uint256[] memory array = new uint256[](_length); 
 
@@ -605,7 +604,6 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         }   
 
         return array;
-
     }
 
     function changeVulnMod(uint _vulnMod) external onlyAuthorized {
