@@ -123,6 +123,9 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint rollMod = 70; 
     uint rollNormalizer = 31;
 
+    uint makerNFTnumerator = 65;
+    uint takerNFTnumerator = 150;
+
     uint loserSBXamount = 200000000000;
   
     IDirectory public directory;
@@ -201,7 +204,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
-        require(msg.value == getNFTdelta(mintClass, _gameid), "E89");
+        require(usdamount >= getNFTdelta(mintClass, _gameid), "E89");
+        require(_msgSender() != gameinfo.makerAddress, "102");
 
         randNonce++;
 
@@ -397,12 +401,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             return gameinfo.makerBNBamount;
         }
 
-        if(gameinfo.makerNFTratio > _mintClass) {
-           return uint(gameinfo.makerNFTratio).sub(_mintClass).mul(gameinfo.makerBNBamount);
+        if(gameinfo.makerNFTratio > _mintClass) { //maker NFT higher rarity
+           return uint(gameinfo.makerBNBamount).mul(uint(gameinfo.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
         }
 
-        if(gameinfo.makerNFTratio < _mintClass) {
-           return uint(gameinfo.makerBNBamount).div(uint(_mintClass).sub(gameinfo.makerNFTratio));
+        if(gameinfo.makerNFTratio < _mintClass) { //maker NFT lower rarity
+            return uint(uint(gameinfo.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gameinfo.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
         }
 
     }
@@ -606,16 +610,22 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function changeVulnMod(uint _vulnMod) external onlyAuthorized {
         require(vulnMod >=5, "E96");
-        require(vulnMod < rollNormalizer, "E96");
+        require(vulnMod < rollNormalizer, "E97");
         vulnMod = _vulnMod;
     }
 
     function changeRollParams(uint _rollMod, uint _rollNormalizer) external onlyAuthorized {
-        require(_rollMod > 50, "E100");
-        require(_rollMod > rollNormalizer, "E98");
-        require(_rollNormalizer > vulnMod, "E99");
+        require(_rollMod >= 50, "E98");
+        require(_rollMod > rollNormalizer, "E99");
+        require(_rollNormalizer > vulnMod, "E100");
 
         rollMod = _rollMod;
         rollNormalizer = _rollNormalizer;
+    }
+
+    function changeNumerators(uint _maker, uint _taker) external onlyAuthorized {
+        require(_maker < _taker, "E101");
+        makerNFTnumerator = _maker;
+        takerNFTnumerator = _taker;
     }
 }
