@@ -120,6 +120,8 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     uint256 gameFee = 0.0025 ether;
 
     uint vulnMod = 15; //range 0-14 of rando vulnerability
+    uint rollMod = 70; 
+    uint rollNormalizer = 31;
 
     uint loserSBXamount = 200000000000;
   
@@ -158,14 +160,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
-        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 100); //get user roll 0-99
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-59
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
 
         gameinfo.makerAddress = _msgSender();
         gameinfo.makerBNBamount = uint128(msg.value);
         gameinfo.makerNFTPack = uint8(packid);
         gameinfo.makerNFTID = uint8(nftid);
-        gameinfo.makerRoll = uint64(roll++);
+        gameinfo.makerRoll = uint64(roll.add(rollNormalizer));
         gameinfo.makerRollDelta = uint64(vulnerabilityroll++);  
         gameinfo.makerTokenID = uint16(_tokenid);
         gameinfo.makerNFTratio = uint8(mintClass);
@@ -203,14 +205,14 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         randNonce++;
 
-        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, 100); //get user roll 0-99
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-59
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
 
         gameresult.takerAddress = _msgSender();
         gameresult.takerBNBamount = uint128(msg.value);
         gameresult.takerNFTPack = uint8(packid);
         gameresult.takerNFTID = uint8(nftid);
-        gameresult.takerRoll = uint64(roll++);
+        gameresult.takerRoll = uint64(roll.add(rollNormalizer));
         gameresult.takerRollDelta = uint64(vulnerabilityroll++);  
         gameresult.takerTokenID = uint16(_tokenid);
         gameresult.takerMintClass = uint8(mintClass);
@@ -320,7 +322,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         GameInfo storage gameinfo = gameInfo[_gameId];
 
         if (authorized[_msgSender()] || gameinfo.makerAddress == _msgSender()) {
-            
+
             return (
                 gameinfo.makerAddress, 
                 gameinfo.makerTokenID, 
@@ -387,7 +389,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     }
 
-    function getNFTdelta(uint _mintClass, uint _gameId) internal view returns (uint amount) {
+    function getNFTdelta(uint _mintClass, uint _gameId) public view returns (uint amount) {
 
         GameInfo storage gameinfo = gameInfo[_gameId];
 
@@ -400,7 +402,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         }
 
         if(gameinfo.makerNFTratio < _mintClass) {
-           return uint(_mintClass).sub(gameinfo.makerNFTratio).mul(gameinfo.makerBNBamount);
+           return uint(gameinfo.makerBNBamount).div(uint(_mintClass).sub(gameinfo.makerNFTratio));
         }
 
     }
@@ -604,6 +606,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     function changeVulnMod(uint _vulnMod) external onlyAuthorized {
         require(vulnMod >=5, "E96");
+        require(vulnMod < rollNormalizer, "E96");
         vulnMod = _vulnMod;
+    }
+
+    function changeRollParams(uint _rollMod, uint _rollNormalizer) external onlyAuthorized {
+        require(_rollMod > 50, "E100");
+        require(_rollMod > rollNormalizer, "E98");
+        require(_rollNormalizer > vulnMod, "E99");
+
+        rollMod = _rollMod;
+        rollNormalizer = _rollNormalizer;
     }
 }
