@@ -45,6 +45,7 @@ contract Directory is Ownable, Authorizable {
     address public getPacks;
     address public getCrates;
     address public getMarketplace;
+    address public getPVP;
 
     constructor() {}
 
@@ -78,7 +79,8 @@ contract Directory is Ownable, Authorizable {
         address a12,
         address a13,
         address a14,
-        address a15
+        address a15,
+        address a16
     ) 
     external onlyAuthorized {
         getSBX = a9;
@@ -88,6 +90,7 @@ contract Directory is Ownable, Authorizable {
         getPacks = a13;
         getCrates = a14;
         getMarketplace = a15;
+        getPVP = a16;
     }
 
     function rescueETHFromContract() external onlyAuthorized {
