@@ -3,7 +3,7 @@
 // Teaze.Finance Staking Contract Version 1.0
 // Stake your $teaze or LP tokens to receive SimpBux rewards (SBX)
 
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -33,6 +33,7 @@ interface IDirectory {
     function getNFT() external view returns (address);
     function getPacks() external view returns (address);
     function getCrates() external view returns (address);
+    function getPVP() external view returns (address);
 }
 
 // Allows another user(s) to change contract variables
@@ -749,7 +750,7 @@ contract TeazeFarm is Ownable, Authorized, ReentrancyGuard {
     }
 
     function increaseSBXBalance(address _address, uint256 _amount) external {
-        require(msg.sender == address(directory.getLotto()) || msg.sender == address(directory.getPacks()), "E68");
+        require(msg.sender == address(directory.getLotto()) || msg.sender == address(directory.getPacks()) || msg.sender == address(directory.getPVP()), "E68");
         userBalance[_address] = userBalance[_address].add(_amount);
     }
 
