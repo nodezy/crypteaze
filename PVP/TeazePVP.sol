@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
@@ -24,6 +24,7 @@ interface ITeazeNFT {
     function isApprovedForAll(address owner, address operator) external view returns (bool);
     function balanceOf(address owner) external view returns (uint);
     function setApprovalForAll(address operator, bool status) external;
+    function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
 }
 
 interface IOracle {
@@ -46,7 +47,6 @@ interface ITeazePacks {
     function getLootboxAble(uint256 _nftid) external view returns (bool); 
     function getPackTimelimitCrates(uint256 _nftid) external view returns (bool);
     function getNFTExists(uint256 _nftid) external view returns (bool);
-    function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
     function getTotalPacks() external view returns (uint);
     function getGenus(uint _packid) external view returns (string memory);
     function getAllGenus() external view returns (uint, string[] memory);
@@ -65,7 +65,7 @@ interface ISimpCrates {
     function claimedNFT(uint token) external view returns (bool);
 }
 
-contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
+contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -150,8 +150,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
         require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
         
-        uint usdamount = getOracleAmounts(msg.value);
-        require(usdamount >= minBet && usdamount <= maxBet, "E90");
+        require(msg.value >= getOracleAmounts(minBet) && msg.value <= getOracleAmounts(maxBet), "E89");
 
         randNonce++;
 
@@ -196,15 +195,12 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
         require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
         
-        uint usdamount = getOracleAmounts(msg.value);
-        require(usdamount >= minBet && usdamount <= maxBet, "E90");
-
         GameInfo storage gameinfo = gameInfo[_gameid];
         GameResult storage gameresult = gameResult[_gameid];
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
-        require(usdamount >= getNFTdelta(mintClass, _gameid), "E89");
+        require(msg.value >= getNFTdelta(mintClass, _gameid), "E89");
         require(_msgSender() != gameinfo.makerAddress, "102");
 
         randNonce++;
@@ -411,16 +407,16 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     }
 
-    function getOracleAmounts(uint _bnbamount) public view returns (uint amountusd) {
-        uint usdamount = IOracle(directory.getOracle()).getbnbusdequivalent(_bnbamount);
-        return usdamount;
+    function getOracleAmounts(uint _usdamount) public view returns (uint amountusd) {
+        uint bnbamount = IOracle(directory.getOracle()).getbnbusdequivalent(_usdamount);
+        return bnbamount;
     }
 
     function getPVPNFTinfo(uint _tokenID) public view returns (uint, uint, uint, uint, string memory) {
 
         address packs = directory.getPacks();
 
-        uint nftid = ITeazePacks(packs).getNFTIDwithToken(_tokenID);
+        uint nftid = ITeazeNFT(directory.getNFT()).getNFTIDwithToken(_tokenID);
         uint packid = ITeazePacks(packs).getPackIDbyNFT(nftid);
         uint mintPercent = ITeazePacks(packs).getNFTPercent(nftid);
         uint mintClass = ITeazePacks(packs).getNFTClass(nftid);
@@ -625,5 +621,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         require(_maker < _taker, "E101");
         makerNFTnumerator = _maker;
         takerNFTnumerator = _taker;
+    }
+
+    function rescueETHFromContract() external onlyOwner {
+        address payable _owner = payable(_msgSender());
+        _owner.transfer(address(this).balance);
+    }
+
+    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+       
+        IERC20(_tokenAddr).transfer(_to, _amount);
     }
 }
