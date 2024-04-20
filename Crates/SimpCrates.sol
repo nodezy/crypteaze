@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
@@ -18,18 +18,14 @@ interface Inserter {
 
 interface ITeazePacks {
     function getCurrentNFTID() external view returns (uint256);
-    function getNFTURI(uint256 _nftid) external view returns (string memory);
-    function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool);   
     function getNFTClass(uint256 _nftid) external view returns (uint256);
     function getNFTPercent(uint256 _nftid) external view returns (uint256);
     function getLootboxAble(uint256 _nftid) external view returns (bool); 
     function getPackTimelimitCrates(uint256 _nftid) external view returns (bool);
     function getNFTExists(uint256 _nftid) external view returns (bool);
-    function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
 }
 
 interface ITeazeNFT {
-    function tokenURI(uint256 tokenId) external view returns (string memory); 
     function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
     function getUserTokenIDtoNFTID(address _holder, uint _tokenID) external view returns (uint256);
 }
