@@ -17,13 +17,9 @@ interface ITeazeFarm {
 
 interface ITeazeNFT {
     function tokenURI(uint256 tokenId) external view returns (string memory); 
-    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
     function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256,bool); 
     function ownerOf(uint256 tokenId) external view returns (address owner);
-    function getApproved(uint256 tokenId) external view returns (address);
-    function isApprovedForAll(address owner, address operator) external view returns (bool);
     function balanceOf(address owner) external view returns (uint);
-    function setApprovalForAll(address operator, bool status) external;
 }
 
 interface Inserter {
@@ -43,7 +39,7 @@ interface IDirectory {
     function getNFT() external view returns (address);
     function getCrates() external view returns (address);
     function getInserter() external view returns (address);
-    
+    function getSBX() external view returns (address);
 }
 
 contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
@@ -92,7 +88,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     mapping(address => mapping(uint => uint)) public userPackPurchased; //How many of each pack a certain address has minted.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
-
+    
     IDirectory public directory;
     address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
@@ -114,17 +110,17 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
     receive() external payable {}
     
 
-    function premint(address _recipient, uint256 _packid, bool _mintToken) public nonReentrant {
+    function premint(address _recipient, uint256 _packid, bool _mintToken) external {
 
-        randNonce++;
+        require(address(directory.getFarm()) != address(0), "E02");
+        require(msg.sender == address(directory.getFarm()), "E03");
 
         uint256 nftbalance = IERC721(directory.getNFT()).balanceOf(_recipient);
         if (_recipient != owner()) {
             require(nftbalance <= 100, "E01");
         }
-        
-        require(address(directory.getFarm()) != address(0), "E02");
-        require(msg.sender == address(directory.getFarm()), "E03");
+
+        randNonce++;
 
         PackInfo storage packinfo = packInfo[_packid];
 
@@ -164,11 +160,11 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             _nftid = array[roll];
         }
 
-        checkMint(_recipient,_packid,_nftid,_mintToken);
+        checkMint(_recipient,_packid,_nftid,_mintToken); 
 
     }
 
-    function checkMint(address _recipient, uint _packid, uint _nftid, bool _mintToken) public nonReentrant returns (uint tokenId, bool minted) {
+    function checkMint(address _recipient, uint _packid, uint _nftid, bool _mintToken) internal returns (uint tokenId, bool minted) {
         
         bool held;
         bool burn;
@@ -190,6 +186,7 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             burnAmt = getNFTSBXburnAmount(token);
             
             ITeazeFarm(directory.getFarm()).increaseSBXBalance(_recipient, getNFTSBXburnAmount(token)); 
+            //safeTokenTransfer(_recipient, burnAmt);
             
             return (burnAmt,false);
 
@@ -818,6 +815,15 @@ contract TeazePacks is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         PackInfo storage packinfo = packInfo[_packid];
 
         return packinfo.genusName;
+    }
+
+    // Safe simpbux token transfer function, just in case if
+    // rounding error causes pool to not have enough simpbux tokens
+    function safeTokenTransfer(address _to, uint256 _amount) internal {
+        IERC20 rewardtoken = IERC20(directory.getSBX()); //SimpBux
+        uint256 balance = rewardtoken.balanceOf(address(this));
+        uint256 amount = _amount > balance ? balance : _amount;
+        rewardtoken.transfer(_to, amount);
     }
 
 }
