@@ -16,14 +16,6 @@ interface ITeazeFarm {
 }
 
 interface ITeazeNFT {
-    function tokenURI(uint256 tokenId) external view returns (string memory); 
-    function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256);
-    function mint(address _recipient, string memory _uri, uint _packNFTid) external returns (uint256,bool); 
-    function ownerOf(uint256 tokenId) external view returns (address owner);
-    function getApproved(uint256 tokenId) external view returns (address);
-    function isApprovedForAll(address owner, address operator) external view returns (bool);
-    function balanceOf(address owner) external view returns (uint);
-    function setApprovalForAll(address operator, bool status) external;
     function getNFTIDwithToken(uint256 _tokenid) external view returns (uint256);
 }
 
@@ -39,14 +31,8 @@ interface Inserter {
 
 interface ITeazePacks {
     function getPackIDbyNFT(uint256 _nftid) external view returns (uint256); 
-    function getCurrentNFTID() external view returns (uint256);
-    function getNFTURI(uint256 _nftid) external view returns (string memory);
-    function getPackInfo(uint256 _packid) external view returns (uint256,uint256,uint256,uint256,bool,bool);   
     function getNFTClass(uint256 _nftid) external view returns (uint256);
     function getNFTPercent(uint256 _nftid) external view returns (uint256);
-    function getLootboxAble(uint256 _nftid) external view returns (bool); 
-    function getPackTimelimitCrates(uint256 _nftid) external view returns (bool);
-    function getNFTExists(uint256 _nftid) external view returns (bool);
     function getTotalPacks() external view returns (uint);
     function getGenus(uint _packid) external view returns (string memory);
     function getAllGenus() external view returns (uint, string[] memory);
