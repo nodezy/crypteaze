@@ -2,11 +2,13 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./auth.sol";
 
@@ -51,7 +53,7 @@ interface ISimpCrates {
     function claimedNFT(uint token) external view returns (bool);
 }
 
-contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
+contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, ReentrancyGuard {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -71,7 +73,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         uint64 makerRoll;
         uint64 makerRollDelta;
         uint64 timeStart;
-        uint64 timeEnds;
+        uint64 timeExpires;
         uint128 makerBNBamount;
         bool open; 
     }
@@ -80,13 +82,13 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         address takerAddress;  
         uint16 takerTokenID; 
         uint8 takerNFTPack;  
+        uint8 takerNFTID; 
         uint8 takerVulnerable; 
         uint8 takerMintClass;
-        uint8 takerNFTID; 
-        uint64 timeEnds;
         uint64 takerRoll;
         uint64 takerRollDelta;
         uint64 runnerUpAmount;
+        uint64 timeEnds;
         uint128 takerBNBamount;
         string winner;
     }
@@ -131,6 +133,11 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
     receive() external payable {}
 
+    
+    function onERC721Received(address, address, uint256, bytes memory) public virtual override returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
     function openPVP(uint _tokenid) public payable nonReentrant {
 
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
@@ -148,7 +155,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
-        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-59
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-69
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
 
         gameinfo.makerAddress = _msgSender();
@@ -161,7 +168,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameinfo.makerNFTratio = uint8(mintClass);
         gameinfo.makerVulnerable = uint8(getVulnerability(packid)); 
         gameinfo.timeStart = uint64(block.timestamp);
-        gameinfo.timeEnds = uint64(block.timestamp.add(timeEnding));
+        gameinfo.timeExpires = uint64(block.timestamp.add(timeEnding));
 
         IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), _tokenid);
 
@@ -191,7 +198,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         randNonce++;
 
-        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-59
+        uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-69
         uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
 
         gameresult.takerAddress = _msgSender();
@@ -203,6 +210,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         gameresult.takerTokenID = uint16(_tokenid);
         gameresult.takerMintClass = uint8(mintClass);
         gameresult.takerVulnerable = uint8(getVulnerability(packid)); 
+        gameresult.timeEnds = uint64(block.timestamp);
 
         uint makerTempRoll;
         uint takerTempRoll;
@@ -268,26 +276,13 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
         
     }
 
-    function getVulnerability(uint _packid) internal returns (uint) {
+    function getVulnerability(uint _packid) internal view returns (uint) {
 
         uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
 
         uint256 genusroll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, packs); //get random pack
 
-        genusroll++; //Normalize cause there's no zero pack
-
-        if(_packid == genusroll) {
-
-            randNonce++;
-
-            getVulnerability(_packid);
-
-        } else {
-
-            return genusroll;
-        }
-
-        return 0;
+        return genusroll++; //Normalize cause there's no zero pack
 
     }
 
@@ -422,7 +417,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
             return;
         }
 
-        require(block.timestamp >= gameinfo.timeEnds, "E96");
+        require(block.timestamp >= gameinfo.timeExpires, "E96");
 
         gameinfo.open = false;
         gameresult.winner = "Expired";
@@ -462,7 +457,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         uint[] memory gameids = new uint[](games);
 
-        for(uint x=1;x<=games;x++) {
+        for(uint x=0;x<=games;x++) {
 
             gameids[x] = userGameIDs[_user][x];
 
@@ -479,7 +474,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         uint count;
 
-        for(uint x=1;x<=games;x++) {
+        for(uint x=0;x<=games;x++) {
 
             GameInfo storage gameinfo = gameInfo[gameids[x]];
 
@@ -505,7 +500,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, ReentrancyGuard {
 
         uint count;
 
-        for(uint x=1;x<=games;x++) {
+        for(uint x=0;x<=games;x++) {
 
             GameInfo storage gameinfo = gameInfo[gameids[x]];
 
