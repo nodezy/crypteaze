@@ -553,7 +553,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
-    function viewopenGames() external view returns (uint256[] memory lootboxes){
+    function viewopenGames() external view returns (uint256[] memory opengames){
 
         return opengamearray;
 
@@ -604,12 +604,12 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         takerNFTnumerator = _taker;
     }
 
-    function rescueETHFromContract() external onlyOwner {
+    function rescueETHFromContract() external onlyAuthorized {
         address payable _owner = payable(_msgSender());
         _owner.transfer(address(this).balance);
     }
 
-    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyOwner {
+    function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyAuthorized {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
     }
