@@ -1,6 +1,6 @@
 //Contract based on https://docs.openzeppelin.com/contracts/3.x/erc721
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
@@ -14,8 +14,6 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 interface ITeazePacks {
     function getNFTURI(uint256 _nftid) external view returns (string memory);
-    function getPackIDbyNFT(uint256 _nftid) external view returns (uint256);
-    function getIDbyURI(string memory _uri) external view returns (uint256);
 }
 
 interface IDirectory {
@@ -55,7 +53,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     mapping(string => uint) private NFTmintedCountURI;  // Get total # minted by URI.
     mapping(string => bool) private NFTuriExists;  // Get total # minted by URI.
     mapping(uint256 => uint) private NFTmintedCountID; // Get total # minted by NFTID.
-    mapping(address => mapping(uint => uint)) public UserTokenIDtoNFTID; //Mapping for user->tokenID->nftid from pack.
+    mapping(uint => uint) public TokenIDtoNFTID; //Mapping for tokenID->nftid from pack.
        
     IDirectory public directory;
     uint private minted;
@@ -77,8 +75,8 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
     }
 
     function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual override(ERC721, ERC721Enumerable) {
-        UserTokenIDtoNFTID[to][tokenId] = UserTokenIDtoNFTID[from][tokenId];
-        UserTokenIDtoNFTID[from][tokenId] = 0;
+        //UserTokenIDtoNFTID[to][tokenId] = UserTokenIDtoNFTID[from][tokenId];
+        //UserTokenIDtoNFTID[from][tokenId] = 0;
         super._beforeTokenTransfer(from, to, tokenId);
     }
 
@@ -101,7 +99,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         NFTmintedCountID[_nftid] ++;
 
-        UserTokenIDtoNFTID[_recipient][newItemId] = _nftid;
+        TokenIDtoNFTID[newItemId] = _nftid;
 
         return (newItemId,true); 
 
@@ -122,7 +120,7 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
 
         NFTmintedCountID[_nftid] ++;
 
-        UserTokenIDtoNFTID[_msgSender()][newItemId] = _nftid;
+        TokenIDtoNFTID[newItemId] = _nftid;
 
         return (newItemId,true);
 
@@ -156,8 +154,8 @@ contract TeazeNFT is Ownable, Authorized, ERC721URIStorage, ERC721Enumerable, Re
         directory = IDirectory(_directory);
     }
 
-    function getUserTokenIDtoNFTID(address _holder, uint _tokenID) external view returns (uint256 nftid) {
-        return UserTokenIDtoNFTID[_holder][_tokenID];
+    function getNFTIDwithToken(uint _tokenID) external view returns (uint256 nftid) {
+        return TokenIDtoNFTID[_tokenID];
     }
 
 }
