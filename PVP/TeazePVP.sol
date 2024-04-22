@@ -63,38 +63,49 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     Counters.Counter public _closedGames;  
     Counters.Counter public _expiredGames; 
 
-    struct GameInfo { 
+    struct GameMaker { 
         address makerAddress; 
         uint16 makerTokenID; 
         uint8 makerNFTPack;  
         uint8 makerNFTID;  
-        uint8 makerVulnerable;
+        uint8 makerStrong;
+        uint8 makerStrongRoll;
+        uint8 makerWeak;
+        uint8 makerWeakRoll;
+        uint8 makerRoll;
         uint8 makerNFTratio;
-        uint64 makerRoll;
-        uint64 makerRollDelta;
-        uint64 timeStart;
-        uint64 timeExpires;
         uint128 makerBNBamount;
+        string makerGenus;
         bool open; 
     }
 
-    struct GameResult {
+    struct GameTaker {
         address takerAddress;  
         uint16 takerTokenID; 
         uint8 takerNFTPack;  
         uint8 takerNFTID; 
-        uint8 takerVulnerable; 
+        uint8 takerStrong;
+        uint8 takerStrongRoll;
+        uint8 takerWeak;
+        uint8 takerWeakRoll;
         uint8 takerMintClass;
-        uint64 takerRoll;
-        uint64 takerRollDelta;
+        uint8 takerRoll;
         uint64 runnerUpAmount;
-        uint64 timeEnds;
         uint128 takerBNBamount;
+        string takerGenus;
         string winner;
     }
 
-    mapping(uint256 => GameInfo) private gameInfo; 
-    mapping(uint256 => GameResult) private gameResult; 
+    struct TimeStamps {
+        uint64 timeStart;
+        uint64 timeExpires;
+        uint64 timeEnds;
+
+    }
+
+    mapping(uint256 => GameMaker) private gameMaker; 
+    mapping(uint256 => GameTaker) public gameTaker; 
+    mapping(uint256 => TimeStamps) public timeStamps; 
     mapping(address => uint) public userGames; //userGames[address];
     mapping(address => mapping(uint => uint)) public userGameIDs; //userGameIDs[address][x][gameID];
 
@@ -106,8 +117,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint maxBet= 50;
 
     uint256 gameFee = 0.0025 ether;
-
-    uint vulnMod = 15; //range 0-14 of rando vulnerability
+    uint strenMod = 25; //range 0-24 of rando strength
+    uint weakMod = 15; //range 0-14 of rando weakness
     uint rollMod = 70; 
     uint rollNormalizer = 31;
 
@@ -151,28 +162,32 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         uint256 gameid = _GameIds.current();
 
-        GameInfo storage gameinfo = gameInfo[gameid];
+        GameMaker storage gamemaker = gameMaker[gameid];
+        TimeStamps storage timestamps = timeStamps[gameid];
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
         uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-69
-        uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
+        uint256 strengthroll = Inserter(directory.getInserter()).getRandMod(randNonce+1, _tokenid, strenMod); 
+        uint256 weaknessroll = Inserter(directory.getInserter()).getRandMod(randNonce+2, _tokenid, weakMod); 
 
-        gameinfo.makerAddress = _msgSender();
-        gameinfo.makerBNBamount = uint128(msg.value);
-        gameinfo.makerNFTPack = uint8(packid);
-        gameinfo.makerNFTID = uint8(nftid);
-        gameinfo.makerRoll = uint64(roll.add(rollNormalizer));
-        gameinfo.makerRollDelta = uint64(vulnerabilityroll++);  
-        gameinfo.makerTokenID = uint16(_tokenid);
-        gameinfo.makerNFTratio = uint8(mintClass);
-        gameinfo.makerVulnerable = uint8(getVulnerability(packid)); 
-        gameinfo.timeStart = uint64(block.timestamp);
-        gameinfo.timeExpires = uint64(block.timestamp.add(timeEnding));
+        gamemaker.makerAddress = _msgSender();
+        gamemaker.makerTokenID = uint16(_tokenid);
+        gamemaker.makerNFTPack = uint8(packid);
+        gamemaker.makerNFTID = uint8(nftid);
+        gamemaker.makerStrong = uint8(getStrength(packid)); 
+        gamemaker.makerStrongRoll = uint8(strengthroll++);
+        gamemaker.makerWeak = uint8(getWeakness(packid)); 
+        gamemaker.makerWeakRoll = uint8(weaknessroll++);  
+        gamemaker.makerNFTratio = uint8(mintClass);
+        gamemaker.makerRoll = uint8(roll.add(rollNormalizer));
+        timestamps.timeStart = uint64(block.timestamp);
+        timestamps.timeExpires = uint64(block.timestamp.add(timeEnding));
+        gamemaker.makerBNBamount = uint128(msg.value);
+        gamemaker.open = true;
+        gamemaker.makerGenus = ITeazePacks(directory.getPacks()).getGenus(packid);
 
         IERC721(directory.getNFT()).safeTransferFrom(_msgSender(), address(this), _tokenid);
-
-        gameinfo.open = true;
 
         userGames[_msgSender()]++;
 
@@ -188,202 +203,135 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
         require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
         
-        GameInfo storage gameinfo = gameInfo[_gameid];
-        GameResult storage gameresult = gameResult[_gameid];
+        GameMaker storage gamemaker = gameMaker[_gameid];
+        GameTaker storage gameresult = gameTaker[_gameid];
+        TimeStamps storage timestamps = timeStamps[_gameid];
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
         require(msg.value >= getNFTdelta(mintClass, _gameid), "E89");
-        require(_msgSender() != gameinfo.makerAddress, "102");
+        require(_msgSender() != gamemaker.makerAddress, "102");
 
         randNonce++;
 
         uint256 roll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-69
-        uint256 vulnerabilityroll = Inserter(directory.getInserter()).getRandMod(randNonce, _tokenid, vulnMod); //get vulnerability roll 0-14
+        uint256 strengthroll = Inserter(directory.getInserter()).getRandMod(randNonce+1, _tokenid, strenMod); 
+        uint256 weaknessroll = Inserter(directory.getInserter()).getRandMod(randNonce+2, _tokenid, weakMod); 
 
-        gameresult.takerAddress = _msgSender();
-        gameresult.takerBNBamount = uint128(msg.value);
+        gameresult.takerAddress = _msgSender(); 
+        gameresult.takerTokenID = uint16(_tokenid);
         gameresult.takerNFTPack = uint8(packid);
         gameresult.takerNFTID = uint8(nftid);
-        gameresult.takerRoll = uint64(roll.add(rollNormalizer));
-        gameresult.takerRollDelta = uint64(vulnerabilityroll++);  
-        gameresult.takerTokenID = uint16(_tokenid);
+        gameresult.takerStrong = uint8(getStrength(packid)); 
+        gameresult.takerStrongRoll = uint8(strengthroll++);
+        gameresult.takerWeak = uint8(getWeakness(packid)); 
+        gameresult.takerWeakRoll = uint8(weaknessroll++); 
         gameresult.takerMintClass = uint8(mintClass);
-        gameresult.takerVulnerable = uint8(getVulnerability(packid)); 
-        gameresult.timeEnds = uint64(block.timestamp);
-
-        uint makerTempRoll;
-        uint takerTempRoll;
-
-        if(gameinfo.makerNFTPack == gameresult.takerVulnerable) {
-            takerTempRoll = uint(gameresult.takerRoll).sub(gameresult.takerRollDelta);
-        } else {
-            takerTempRoll = gameresult.takerRoll;
-        }
-
-        if(gameresult.takerNFTPack == gameinfo.makerVulnerable) {
-            makerTempRoll = uint(gameinfo.makerRoll).sub(gameinfo.makerRollDelta);
-        } else {
-            makerTempRoll = gameinfo.makerRoll;
-        }
-
-        if(makerTempRoll == takerTempRoll) { //tie
-
-            gameresult.winner = "Tie";
-
-            payable(gameinfo.makerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameinfo.makerAddress, gameinfo.makerTokenID);
-
-            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
-
-        } 
-        
-        if(makerTempRoll > takerTempRoll) { //maker wins
-
-            gameresult.winner = "Maker";
-            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gameresult.takerMintClass));
-            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), gameresult.runnerUpAmount);
-
-            payable(gameinfo.makerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameinfo.makerAddress, gameinfo.makerTokenID);
-
-            payable(gameinfo.makerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, gameinfo.makerAddress, gameresult.takerTokenID);
-
-        } 
-
-        if(makerTempRoll < takerTempRoll) { //taker wins
-
-            gameresult.winner = "Taker";
-            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gameinfo.makerNFTratio));
-            ITeazeFarm(directory.getFarm()).increaseSBXBalance(gameinfo.makerAddress, gameresult.runnerUpAmount);
-
-            payable(gameresult.takerAddress).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameresult.takerAddress, gameinfo.makerTokenID);
-
-            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
-
-        } 
-
+        gameresult.takerRoll = uint8(roll.add(rollNormalizer));
+        timestamps.timeEnds = uint64(block.timestamp);
+        gameresult.takerBNBamount = uint128(msg.value);
+        gameresult.takerGenus = ITeazePacks(directory.getPacks()).getGenus(packid);
+    
         userGames[_msgSender()]++;
 
         uint usergames = userGames[_msgSender()];
 
         userGameIDs[_msgSender()][usergames]= _gameid;
 
-        gameinfo.open = false;
+        gamemaker.open = false;
+
+        distributeOutcome(_gameid);
         closeGame(_gameid, true);
         
     }
 
-    function getVulnerability(uint _packid) internal view returns (uint) {
+    function getStrength(uint _packid) internal view returns (uint) {
 
         uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
 
-        uint256 genusroll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, packs); //get random pack
+        uint256 strengthroll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, packs); //get random pack
 
-        return genusroll++; //Normalize cause there's no zero pack
+        return strengthroll++; //Normalize cause there's no zero pack
 
     }
 
-    function viewGameInfo(uint _gameId) external view returns (
-        address makerAddress, 
-        uint16 makerTokenID, 
-        uint8 makerNFTPack,  
-        uint8 makerNFTID,  
-        uint8 makerVulnerable,
-        uint64 makerRoll,
-        uint64 makerRollDelta,
-        uint64 timeStart,
-        uint64 makerNFTratio,
+    function getWeakness(uint _packid) internal view returns (uint) {
+
+        (, string[] memory genus) = ITeazePacks(directory.getPacks()).getAllGenus();
+
+        uint256 genusroll = Inserter(directory.getInserter()).getRandMod(randNonce, _packid, genus.length); //get random pack
+
+        return genusroll; 
+
+    }
+
+    function viewGameMaker(uint _gameID) external view returns (
+        address makerAddress,
+        uint16 makerTokenID,
+        uint8 makerNFTPack, 
+        uint8 makerNFTID, 
+        uint8 makerNFTratio,
         uint128 makerBNBamount,
+        string memory makerGenus,
         bool open
     ) {
 
-        GameInfo storage gameinfo = gameInfo[_gameId];
+        GameMaker storage gamemaker = gameMaker[_gameID];
 
-        if (authorized[_msgSender()] || gameinfo.makerAddress == _msgSender()) {
-
-            return (
-                gameinfo.makerAddress, 
-                gameinfo.makerTokenID, 
-                gameinfo.makerNFTPack,  
-                gameinfo.makerNFTID,  
-                gameinfo.makerVulnerable,
-                gameinfo.makerRoll,
-                gameinfo.makerRollDelta,
-                gameinfo.timeStart,
-                gameinfo.makerNFTratio,
-                gameinfo.makerBNBamount,
-                gameinfo.open
-            );
-
-        } else {
-
-            return (
-                gameinfo.makerAddress, 
-                gameinfo.makerTokenID, 
-                gameinfo.makerNFTPack,  
-                gameinfo.makerNFTID,  
-                0,
-                0,
-                0,
-                gameinfo.timeStart,
-                gameinfo.makerNFTratio,
-                gameinfo.makerBNBamount,
-                gameinfo.open
-            );
-
-        }     
+        return (
+            gamemaker.makerAddress,
+            gamemaker.makerTokenID,
+            gamemaker.makerNFTPack, 
+            gamemaker.makerNFTID, 
+            gamemaker.makerNFTratio,
+            gamemaker.makerBNBamount,
+            gamemaker.makerGenus,
+            gamemaker.open
+        );
 
     }
 
-    function viewGameResult(uint _gameId) external view returns (
-        address takerAddress,  
-        uint16 takerTokenID, 
-        uint8 takerNFTPack,  
-        uint8 takerVulnerable, 
-        uint8 takerNFTID, 
-        uint64 timeEnds,
-        uint64 takerRoll,
-        uint64 takerRollDelta,
-        uint64 runnerUpAmount,
-        uint128 takerBNBamount,
-        string memory winner
+    function getMakerInfo(uint _gameId) external view returns (
+        
+        uint8 makerStrong,
+        uint8 makerStrongRoll,
+        uint8 makerWeak,
+        uint8 makerWeakRoll,
+        uint8 makerRoll
+        
     ) {
 
-        GameResult storage gameresult = gameResult[_gameId];
+        GameMaker storage gamemaker = gameMaker[_gameId];
 
-        return (
-            gameresult.takerAddress,  
-            gameresult.takerTokenID, 
-            gameresult.takerNFTPack,  
-            gameresult.takerVulnerable, 
-            gameresult.takerNFTID, 
-            gameresult.timeEnds,
-            gameresult.takerRoll,
-            gameresult.takerRollDelta,
-            gameresult.runnerUpAmount,
-            gameresult.takerBNBamount,
-            gameresult.winner
-        );
+        if (authorized[_msgSender()] || gamemaker.makerAddress == _msgSender()) {
+
+            return (
+
+                gamemaker.makerStrong,
+                gamemaker.makerStrongRoll,
+                gamemaker.makerWeak,
+                gamemaker.makerWeakRoll,
+                gamemaker.makerRoll
+            );
+
+        }
 
     }
 
     function getNFTdelta(uint _mintClass, uint _gameId) public view returns (uint amount) {
 
-        GameInfo storage gameinfo = gameInfo[_gameId];
+        GameMaker storage gamemaker = gameMaker[_gameId];
 
-        if(gameinfo.makerNFTratio == _mintClass) {
-            return gameinfo.makerBNBamount;
+        if(gamemaker.makerNFTratio == _mintClass) {
+            return gamemaker.makerBNBamount;
         }
 
-        if(gameinfo.makerNFTratio > _mintClass) { //maker NFT higher rarity
-           return uint(gameinfo.makerBNBamount).mul(uint(gameinfo.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
+        if(gamemaker.makerNFTratio > _mintClass) { //maker NFT higher rarity
+           return uint(gamemaker.makerBNBamount).mul(uint(gamemaker.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
         }
 
-        if(gameinfo.makerNFTratio < _mintClass) { //maker NFT lower rarity
-            return uint(uint(gameinfo.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gameinfo.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
+        if(gamemaker.makerNFTratio < _mintClass) { //maker NFT lower rarity
+            return uint(uint(gamemaker.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gamemaker.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
         }
 
     }
@@ -408,22 +356,23 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     }
 
     function delistPVP(uint _gameId) external nonReentrant {
-        GameInfo storage gameinfo = gameInfo[_gameId];
-        GameResult storage gameresult = gameResult[_gameId];
+        GameMaker storage gamemaker = gameMaker[_gameId];
+        GameTaker storage gameresult = gameTaker[_gameId];
+        TimeStamps storage timestamps = timeStamps[_gameId];
 
-        if (gameinfo.open) {
-            require(gameinfo.makerAddress == _msgSender(), "E90");
+        if (gamemaker.open) {
+            require(gamemaker.makerAddress == _msgSender(), "E90");
         } else {
             return;
         }
 
-        require(block.timestamp >= gameinfo.timeExpires, "E96");
+        require(block.timestamp >= timestamps.timeExpires, "E96");
 
-        gameinfo.open = false;
+        gamemaker.open = false;
         gameresult.winner = "Expired";
 
-        payable(_msgSender()).transfer(uint(gameinfo.makerBNBamount).sub(gameFee));
-        IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gameinfo.makerTokenID);
+        payable(_msgSender()).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
+        IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gamemaker.makerTokenID);
 
         closeGame(_gameId, false);
         
@@ -457,7 +406,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         uint[] memory gameids = new uint[](games);
 
-        for(uint x=0;x<=games;x++) {
+        for(uint x=0;x<games;x++) {
 
             gameids[x] = userGameIDs[_user][x];
 
@@ -474,11 +423,11 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         uint count;
 
-        for(uint x=0;x<=games;x++) {
+        for(uint x=0;x<games;x++) {
 
-            GameInfo storage gameinfo = gameInfo[gameids[x]];
+            GameMaker storage gamemaker = gameMaker[gameids[x]];
 
-            if(gameinfo.open) {
+            if(gamemaker.open) {
 
                 opengameids[count] = userGameIDs[_user][x];
 
@@ -500,11 +449,11 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         uint count;
 
-        for(uint x=0;x<=games;x++) {
+        for(uint x=0;x<games;x++) {
 
-            GameInfo storage gameinfo = gameInfo[gameids[x]];
+            GameMaker storage gamemaker = gameMaker[gameids[x]];
 
-            if(!gameinfo.open) {
+            if(!gamemaker.open) {
 
                 closedgameids[count] = userGameIDs[_user][x];
 
@@ -515,6 +464,75 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         }
 
         return closedgameids;
+
+    }
+
+    function distributeOutcome(uint _gameid) internal {
+
+        GameMaker storage gamemaker = gameMaker[_gameid];
+        GameTaker storage gameresult = gameTaker[_gameid];
+
+        uint makerTempRoll;
+        uint takerTempRoll;
+        (, string[] memory genus) = ITeazePacks(directory.getPacks()).getAllGenus();
+
+        //maker strength
+        if(gamemaker.makerStrong == gameresult.takerNFTPack) {
+            makerTempRoll = uint(gamemaker.makerRoll).add(gamemaker.makerStrongRoll);
+        }
+
+        //taker strength
+        if(gameresult.takerStrong == gamemaker.makerNFTPack) {
+            takerTempRoll = uint(gameresult.takerRoll).add(gameresult.takerStrongRoll);
+        }
+
+        //maker weakness
+        if(keccak256(bytes(genus[gamemaker.makerWeak])) == keccak256(bytes(gameresult.takerGenus))) {
+            makerTempRoll = uint(makerTempRoll).sub(gamemaker.makerWeakRoll);
+        } 
+
+        //taker weakness
+        if(keccak256(bytes(genus[gameresult.takerWeak])) == keccak256(bytes(gamemaker.makerGenus))) {
+            takerTempRoll = uint(takerTempRoll).sub(gameresult.takerWeakRoll);
+        } 
+
+        if(makerTempRoll == takerTempRoll) { //tie
+
+            gameresult.winner = "Tie";
+
+            payable(gamemaker.makerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
+
+            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+
+        } 
+        
+        if(makerTempRoll > takerTempRoll) { //maker wins
+
+            gameresult.winner = "Maker";
+            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gameresult.takerMintClass));
+            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), gameresult.runnerUpAmount);
+
+            payable(gamemaker.makerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
+
+            payable(gamemaker.makerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, gamemaker.makerAddress, gameresult.takerTokenID);
+
+        } 
+
+        if(makerTempRoll < takerTempRoll) { //taker wins
+
+            gameresult.winner = "Taker";
+            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gamemaker.makerNFTratio));
+            ITeazeFarm(directory.getFarm()).increaseSBXBalance(gamemaker.makerAddress, gameresult.runnerUpAmount);
+
+            payable(gameresult.takerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameresult.takerAddress, gamemaker.makerTokenID);
+
+            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+
+        } 
 
     }
 
@@ -583,16 +601,16 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         return array;
     }
 
-    function changeVulnMod(uint _vulnMod) external onlyAuthorized {
-        require(vulnMod >=5, "E96");
-        require(vulnMod < rollNormalizer, "E97");
-        vulnMod = _vulnMod;
+    function changeweakMod(uint _weakMod) external onlyAuthorized {
+        require(weakMod >=5, "E96");
+        require(weakMod < rollNormalizer, "E97");
+        weakMod = _weakMod;
     }
 
     function changeRollParams(uint _rollMod, uint _rollNormalizer) external onlyAuthorized {
         require(_rollMod >= 50, "E98");
         require(_rollMod > rollNormalizer, "E99");
-        require(_rollNormalizer > vulnMod, "E100");
+        require(_rollNormalizer > weakMod, "E100");
 
         rollMod = _rollMod;
         rollNormalizer = _rollNormalizer;
