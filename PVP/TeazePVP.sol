@@ -46,6 +46,7 @@ interface IDirectory {
     function getPacks() external view returns (address);
     function getInserter() external view returns (address);
     function getOracle() external view returns (address);
+    function getLotto() external view returns (address);
     function getCrates() external view returns (address);
 }
 
@@ -114,9 +115,10 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint256[] private expiredgamearray;  
  
     uint minBet = 5;
-    uint maxBet= 50;
+    uint maxBet= 300;
 
-    uint256 gameFee = 0.0025 ether;
+    uint gameFee = 0.0045 ether;
+    uint totalFees;
     uint strenMod = 25; //range 0-24 of rando strength
     uint weakMod = 15; //range 0-14 of rando weakness
     uint rollMod = 70; 
@@ -128,7 +130,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint loserSBXamount = 200000000000;
   
     IDirectory public directory;
-    address public DEAD = 0x000000000000000000000000000000000000dEaD;
+    //address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
     uint256 timeEnding = 1296000; //default game lifetime of 15 days.
@@ -196,6 +198,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         userGameIDs[_msgSender()][usergames]= gameid;
 
         opengamearray.push(gameid);
+
     }
 
     function acceptPVP(uint _tokenid, uint _gameid) external payable nonReentrant {
@@ -303,7 +306,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         GameMaker storage gamemaker = gameMaker[_gameId];
 
-        if (authorized[_msgSender()] || gamemaker.makerAddress == _msgSender()) {
+        if (authorized[_msgSender()] || gamemaker.makerAddress == _msgSender() || !gamemaker.open) {
 
             return (
 
@@ -318,20 +321,23 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
-    function getNFTdelta(uint _mintClass, uint _gameId) public view returns (uint amount) {
+    function getNFTdelta(uint _mintClass, uint _gameId) public view returns (uint _amount) {
 
         GameMaker storage gamemaker = gameMaker[_gameId];
+        uint amount;
 
         if(gamemaker.makerNFTratio == _mintClass) {
             return gamemaker.makerBNBamount;
         }
 
         if(gamemaker.makerNFTratio > _mintClass) { //maker NFT higher rarity
-           return uint(gamemaker.makerBNBamount).mul(uint(gamemaker.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
+            
+            return amount = uint(gamemaker.makerBNBamount).mul(uint(gamemaker.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
         }
 
         if(gamemaker.makerNFTratio < _mintClass) { //maker NFT lower rarity
-            return uint(uint(gamemaker.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gamemaker.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
+            amount = uint(uint(gamemaker.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gamemaker.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
+            return amount.add(gameFee);
         }
 
     }
@@ -375,7 +381,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gamemaker.makerTokenID);
 
         closeGame(_gameId, false);
-        
+
+        totalFees = totalFees.add(gameFee);
     }
 
     function changeMinMaxBet(uint _min, uint _max) external onlyAuthorized {
@@ -472,18 +479,18 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         GameMaker storage gamemaker = gameMaker[_gameid];
         GameTaker storage gameresult = gameTaker[_gameid];
 
-        uint makerTempRoll;
-        uint takerTempRoll;
+        uint makerTempRoll = gamemaker.makerRoll;
+        uint takerTempRoll = gameresult.takerRoll;
         (, string[] memory genus) = ITeazePacks(directory.getPacks()).getAllGenus();
 
         //maker strength
         if(gamemaker.makerStrong == gameresult.takerNFTPack) {
-            makerTempRoll = uint(gamemaker.makerRoll).add(gamemaker.makerStrongRoll);
+            makerTempRoll = makerTempRoll.add(gamemaker.makerStrongRoll);
         }
 
         //taker strength
         if(gameresult.takerStrong == gamemaker.makerNFTPack) {
-            takerTempRoll = uint(gameresult.takerRoll).add(gameresult.takerStrongRoll);
+            takerTempRoll = takerTempRoll.add(gameresult.takerStrongRoll);
         }
 
         //maker weakness
@@ -505,6 +512,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
             payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
 
+            totalFees = totalFees.add(gameFee.mul(2));
+
         } 
         
         if(makerTempRoll > takerTempRoll) { //maker wins
@@ -519,6 +528,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
             payable(gamemaker.makerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
             IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, gamemaker.makerAddress, gameresult.takerTokenID);
 
+            totalFees = totalFees.add(gameFee.mul(2));
+
         } 
 
         if(makerTempRoll < takerTempRoll) { //taker wins
@@ -531,6 +542,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
             IERC721(directory.getNFT()).safeTransferFrom(address(this), gameresult.takerAddress, gamemaker.makerTokenID);
 
             payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+
+            totalFees = totalFees.add(gameFee.mul(2));
 
         } 
 
@@ -550,7 +563,6 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
                 }
 
                 //Add open game to closed (true) or expired (false) array
-
                 if (status) {
  
                     closedgamearray.push(_gameId);
@@ -630,5 +642,13 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     function transferERC20Tokens(address _tokenAddr, address _to, uint _amount) public onlyAuthorized {
        
         IERC20(_tokenAddr).transfer(_to, _amount);
+    }
+
+    function sweepFees() internal {
+        if(totalFees > gameFee.mul(10)) {
+            payable(directory.getLotto()).transfer(totalFees.mul(50).div(100));
+            payable(directory.getCrates()).transfer(totalFees.mul(50).div(100));
+            totalFees = 0;
+        }         
     }
 }
