@@ -120,10 +120,10 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint gameFee = 0.0045 ether;
     uint feeThreshold = 0.045 ether;
     uint totalFees;
-    uint strenMod = 25; //range 0-24 of rando strength
+    uint strenMod = 15; //range 0-14 of rando strength
     uint weakMod = 15; //range 0-14 of rando weakness
-    uint rollMod = 70; 
-    uint rollNormalizer = 31;
+    uint rollMod = 50; 
+    uint rollNormalizer = 36;
 
     uint makerNFTnumerator = 65;
     uint takerNFTnumerator = 150;
@@ -171,17 +171,17 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
        
-        (uint strength, uint strongroll, uint roll) = getStrength(packid, _tokenid);
-        (uint weak, uint weakroll) = getWeakness(packid, _tokenid);
+        (uint strength, uint strongroll, uint roll) = getStrength(_tokenid);
+        (uint weak, uint weakroll) = getWeakness();
 
         gamemaker.makerAddress = _msgSender();
         gamemaker.makerTokenID = uint16(_tokenid);
         gamemaker.makerNFTPack = uint8(packid);
         gamemaker.makerNFTID = uint8(nftid);
-        gamemaker.makerStrong = uint8(strength++); 
-        gamemaker.makerStrongRoll = uint8(strongroll++);
+        gamemaker.makerStrong = uint8(++strength); 
+        gamemaker.makerStrongRoll = uint8(++strongroll);
         gamemaker.makerWeak = uint8(weak); 
-        gamemaker.makerWeakRoll = uint8(weakroll++);  
+        gamemaker.makerWeakRoll = uint8(++weakroll);  
         gamemaker.makerNFTratio = uint8(mintClass);
         gamemaker.makerRoll = uint8(roll.add(rollNormalizer));
         timestamps.timeStart = uint64(block.timestamp);
@@ -222,17 +222,17 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         randNonce = Inserter(directory.getInserter()).getRandMod(randNonce, _gameid, noncemod);
 
-        (uint strength, uint strongroll, uint roll) = getStrength(packid, _tokenid);
-        (uint weak, uint weakroll) = getWeakness(packid, _tokenid);
+        (uint strength, uint strongroll, uint roll) = getStrength(_tokenid);
+        (uint weak, uint weakroll) = getWeakness();
 
         gameresult.takerAddress = _msgSender(); 
         gameresult.takerTokenID = uint16(_tokenid);
         gameresult.takerNFTPack = uint8(packid);
         gameresult.takerNFTID = uint8(nftid);
-        gameresult.takerStrong = uint8(strength++); 
-        gameresult.takerStrongRoll = uint8(strongroll++);
+        gameresult.takerStrong = uint8(++strength); 
+        gameresult.takerStrongRoll = uint8(++strongroll);
         gameresult.takerWeak = uint8(weak); 
-        gameresult.takerWeakRoll = uint8(weakroll++); 
+        gameresult.takerWeakRoll = uint8(++weakroll); 
         gameresult.takerMintClass = uint8(mintClass);
         gameresult.takerRoll = uint8(roll.add(rollNormalizer));
         timestamps.timeEnds = uint64(block.timestamp);
@@ -252,15 +252,15 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         
     }
 
-    function getStrength(uint _packid, uint _tokenid) internal view returns (uint, uint, uint) {
+    function getStrength(uint _tokenid) internal view returns (uint, uint, uint) {
 
         uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
 
         address insert = directory.getInserter();
 
-        uint256 getstrength = Inserter(insert).getRandMod(randNonce+3, _packid, packs); //get random pack
+        uint256 getstrength = Inserter(insert).getRandMod(randNonce+3, block.timestamp, packs); //get random pack
 
-        uint256 strengthroll = Inserter(insert).getRandMod(randNonce+1, _tokenid, strenMod); 
+        uint256 strengthroll = Inserter(insert).getRandMod(randNonce+1, block.timestamp, strenMod); 
 
         uint256 roll = Inserter(insert).getRandMod(randNonce, _tokenid, rollMod); //get user roll 0-69
         
@@ -268,15 +268,15 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
-    function getWeakness(uint _packid, uint _tokenid) internal view returns (uint, uint) {
+    function getWeakness() internal view returns (uint, uint) {
 
         (, string[] memory genus) = ITeazePacks(directory.getPacks()).getAllGenus();
 
         address insert = directory.getInserter();
 
-        uint256 genusroll = Inserter(insert).getRandMod(randNonce+4, _packid, genus.length); //get random pack
+        uint256 genusroll = Inserter(insert).getRandMod(randNonce+4, block.timestamp, genus.length); //get random pack
 
-        uint256 weaknessroll = Inserter(insert).getRandMod(randNonce+2, _tokenid, weakMod); 
+        uint256 weaknessroll = Inserter(insert).getRandMod(randNonce+2, block.timestamp, weakMod); 
 
         return (genusroll, weaknessroll);
 
@@ -627,7 +627,13 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         return array;
     }
 
-    function changeweakMod(uint _weakMod) external onlyAuthorized {
+    function changeStrongMod(uint _strenMod) external onlyAuthorized {
+        require(strenMod >=5, "E96");
+        require(strenMod < rollNormalizer, "E97");
+        strenMod = _strenMod;
+    }
+
+    function changeWeakMod(uint _weakMod) external onlyAuthorized {
         require(weakMod >=5, "E96");
         require(weakMod < rollNormalizer, "E97");
         weakMod = _weakMod;
