@@ -29,6 +29,7 @@ interface Inserter {
     function makeActive() external; 
     function getNonce() external view returns (uint256);
     function getRandMod(uint256 _extNonce, uint256 _modifier, uint256 _modulous) external view returns (uint256);
+    function checkHash(address _address, address _sender, bytes32 _hash) external view returns (bool);
 }
 
 interface ITeazePacks {
@@ -91,16 +92,24 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         uint8 takerWeakRoll;
         uint8 takerMintClass;
         uint8 takerRoll;
-        uint64 runnerUpAmount;
         uint128 takerBNBamount;
         string takerGenus;
-        string winner;
     }
 
     struct TimeStamps {
         uint64 timeStart;
         uint64 timeExpires;
         uint64 timeEnds;
+        uint8 makerFinalRoll;
+        uint8 takerFinalRoll;
+        address _winner;
+        string winner;
+        uint makerFinalAmt;
+        uint takerFinalAmt;
+        uint makerSBX;
+        uint takerSBX;
+        bool makerClaimed;
+        bool takerClaimed;
 
     }
 
@@ -132,7 +141,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint noncemod = 1207959552;
   
     IDirectory public directory;
-    //address public DEAD = 0x000000000000000000000000000000000000dEaD;
+    address public DEAD = 0x000000000000000000000000000000000000dEaD;
     
     uint256 private randNonce;
     uint256 timeEnding = 1296000; //default game lifetime of 15 days.
@@ -161,6 +170,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         require(msg.value >= getOracleAmounts(minBet) && msg.value <= getOracleAmounts(maxBet), "E89");
 
         _GameIds.increment();
+        _openGames.increment();
 
         uint256 gameid = _GameIds.current();
 
@@ -213,7 +223,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         GameMaker storage gamemaker = gameMaker[_gameid];
         GameTaker storage gameresult = gameTaker[_gameid];
-        TimeStamps storage timestamps = timeStamps[_gameid];
+        //TimeStamps storage timestamps = timeStamps[_gameid];
 
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
@@ -235,7 +245,6 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         gameresult.takerWeakRoll = uint8(++weakroll); 
         gameresult.takerMintClass = uint8(mintClass);
         gameresult.takerRoll = uint8(roll.add(rollNormalizer));
-        timestamps.timeEnds = uint64(block.timestamp);
         gameresult.takerBNBamount = uint128(msg.value);
         gameresult.takerGenus = ITeazePacks(directory.getPacks()).getGenus(packid);
     
@@ -308,19 +317,22 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
-    function getMakerInfo(uint _gameId) external view returns (
+    function getMakerInfo(uint _gameId, bytes32 _hash) external view returns (
         
         uint8 makerStrong,
         uint8 makerStrongRoll,
         uint8 makerWeak,
         uint8 makerWeakRoll,
-        uint8 makerRoll
+        uint8 makerRoll,
+        address sender
         
     ) {
 
         GameMaker storage gamemaker = gameMaker[_gameId];
 
-        if (authorized[_msgSender()] || gamemaker.makerAddress == _msgSender() || !gamemaker.open) {
+        bool matches = Inserter(directory.getInserter()).checkHash(gamemaker.makerAddress, _msgSender(), _hash);
+
+        if (authorized[_msgSender()] || matches || gamemaker.open == false) {
 
             return (
 
@@ -328,9 +340,14 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
                 gamemaker.makerStrongRoll,
                 gamemaker.makerWeak,
                 gamemaker.makerWeakRoll,
-                gamemaker.makerRoll
+                gamemaker.makerRoll,
+                _msgSender()
+
             );
 
+        } else {
+
+            return(0,0,0,0,0,_msgSender());
         }
 
     }
@@ -377,7 +394,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     function delistPVP(uint _gameId) external nonReentrant {
         GameMaker storage gamemaker = gameMaker[_gameId];
-        GameTaker storage gameresult = gameTaker[_gameId];
+        //GameTaker storage gameresult = gameTaker[_gameId];
         TimeStamps storage timestamps = timeStamps[_gameId];
 
         if (gamemaker.open) {
@@ -389,7 +406,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         require(block.timestamp >= timestamps.timeExpires, "E96");
 
         gamemaker.open = false;
-        gameresult.winner = "Expired";
+        timestamps.winner = "Expired";
+        timestamps.makerClaimed = true;
 
         payable(_msgSender()).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
         IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gamemaker.makerTokenID);
@@ -492,6 +510,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         GameMaker storage gamemaker = gameMaker[_gameid];
         GameTaker storage gameresult = gameTaker[_gameid];
+        TimeStamps storage timestamps = timeStamps[_gameid];
 
         uint makerTempRoll = gamemaker.makerRoll;
         uint takerTempRoll = gameresult.takerRoll;
@@ -517,51 +536,120 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
             takerTempRoll = uint(takerTempRoll).sub(gameresult.takerWeakRoll);
         } 
 
+        timestamps.makerFinalRoll = uint8(makerTempRoll);
+        timestamps.takerFinalRoll = uint8(takerTempRoll);
+
+        timestamps.timeEnds = uint64(block.timestamp);
+
         if(makerTempRoll == takerTempRoll) { //tie
 
-            gameresult.winner = "Tie";
+            timestamps.winner = "Tie";
+            timestamps._winner = DEAD;
 
-            payable(gamemaker.makerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
-
-            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+            timestamps.makerFinalAmt = uint(gamemaker.makerBNBamount).sub(gameFee);
+            timestamps.takerFinalAmt = uint(gameresult.takerBNBamount).sub(gameFee);
 
             totalFees = totalFees.add(gameFee.mul(2));
-
         } 
         
         if(makerTempRoll > takerTempRoll) { //maker wins
 
-            gameresult.winner = "Maker";
-            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gameresult.takerMintClass));
-            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), gameresult.runnerUpAmount);
-
-            payable(gamemaker.makerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
-
-            payable(gamemaker.makerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, gamemaker.makerAddress, gameresult.takerTokenID);
+            timestamps.winner = "Maker";
+            timestamps._winner = gamemaker.makerAddress;
+            timestamps.makerFinalAmt = uint(uint(gamemaker.makerBNBamount).sub(gameFee)).add(uint(gameresult.takerBNBamount).sub(gameFee));
+            timestamps.takerClaimed = true;
+            timestamps.takerSBX = uint64(loserSBXamount.mul(gameresult.takerMintClass));
+            ITeazeFarm(directory.getFarm()).increaseSBXBalance(_msgSender(), timestamps.takerSBX);
 
             totalFees = totalFees.add(gameFee.mul(2));
+
+            IERC721(directory.getNFT()).safeTransferFrom(gameresult.takerAddress, address(this), gameresult.takerTokenID);
 
         } 
 
         if(makerTempRoll < takerTempRoll) { //taker wins
 
-            gameresult.winner = "Taker";
-            gameresult.runnerUpAmount = uint64(loserSBXamount.mul(gamemaker.makerNFTratio));
-            ITeazeFarm(directory.getFarm()).increaseSBXBalance(gamemaker.makerAddress, gameresult.runnerUpAmount);
-
-            payable(gameresult.takerAddress).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
-            IERC721(directory.getNFT()).safeTransferFrom(address(this), gameresult.takerAddress, gamemaker.makerTokenID);
-
-            payable(gameresult.takerAddress).transfer(uint(gameresult.takerBNBamount).sub(gameFee));
+            timestamps.winner = "Taker";
+            timestamps._winner = gameresult.takerAddress;
+            timestamps.takerFinalAmt = uint(uint(gamemaker.makerBNBamount).sub(gameFee)).add(uint(gameresult.takerBNBamount).sub(gameFee));
+            timestamps.makerClaimed = true;
+            timestamps.makerSBX = uint64(loserSBXamount.mul(gamemaker.makerNFTratio));
+            ITeazeFarm(directory.getFarm()).increaseSBXBalance(gamemaker.makerAddress, timestamps.makerSBX);
 
             totalFees = totalFees.add(gameFee.mul(2));
 
         } 
 
     }
+
+    function claimWinnings(uint _gameid) external {
+
+        GameMaker storage gamemaker = gameMaker[_gameid];
+        GameTaker storage gameresult = gameTaker[_gameid];
+        TimeStamps storage timestamps = timeStamps[_gameid];
+
+        require(_msgSender() == gamemaker.makerAddress || _msgSender() == gameresult.takerAddress, "E103");
+
+        if(_msgSender() == gamemaker.makerAddress && timestamps._winner == DEAD) {
+            require(!timestamps.makerClaimed, "E104");
+
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
+
+            if(timestamps.makerFinalAmt > 0) {
+                payable(_msgSender()).transfer(timestamps.makerFinalAmt);
+            }
+
+            timestamps.makerClaimed = true;
+
+            return;
+        }
+
+        if(_msgSender() == gameresult.takerAddress && timestamps._winner == DEAD) {
+            require(!timestamps.takerClaimed, "E104");
+
+            if(timestamps.takerFinalAmt > 0) {
+                payable(_msgSender()).transfer(timestamps.takerFinalAmt);
+            }
+
+            timestamps.takerClaimed = true;
+
+            return;
+        }
+
+        if(_msgSender() == gamemaker.makerAddress && timestamps._winner == _msgSender()) {
+            require(!timestamps.makerClaimed, "E104");
+
+            if(timestamps.makerFinalAmt > 0) {
+                payable(_msgSender()).transfer(timestamps.makerFinalAmt);
+            }
+
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
+            IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gameresult.takerTokenID);
+
+            timestamps.makerClaimed = true;
+
+            return;
+        
+        }
+
+        if(_msgSender() == gameresult.takerAddress && timestamps._winner == _msgSender()) {
+            require(!timestamps.takerClaimed, "E104");
+
+            if(timestamps.takerFinalAmt > 0) {
+                payable(_msgSender()).transfer(timestamps.takerFinalAmt);
+            }
+
+           IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
+
+            timestamps.takerClaimed = true;
+
+            return;
+        
+        }
+
+    }
+
+
 
     function closeGame(uint256 _gameId, bool status) internal { //change to internal for production
         uint arraylength = opengamearray.length;
