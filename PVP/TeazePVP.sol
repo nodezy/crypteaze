@@ -69,7 +69,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         address makerAddress; 
         uint16 makerTokenID; 
         uint8 makerNFTPack;  
-        uint8 makerNFTID;  
+        uint8 makerNFTID; 
         uint8 makerStrong;
         uint8 makerStrongRoll;
         uint8 makerWeak;
@@ -118,6 +118,8 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     mapping(uint256 => TimeStamps) public timeStamps; 
     mapping(address => uint) public userGames; //userGames[address];
     mapping(address => mapping(uint => uint)) public userGameIDs; //userGameIDs[address][x][gameID];
+    uint8 public MAX_OPEN_GAMES_PER_USER = 5;
+    mapping(address => uint8) public userOpenGames;
 
     uint256[] private opengamearray;  
     uint256[] private closedgamearray;  
@@ -146,7 +148,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
     uint256 private randNonce;
     uint256 timeEnding = 1296000; //default game lifetime of 15 days.
     
-     
+
     constructor(address _directory) {
         directory = IDirectory(_directory);
         authorized[owner()] = true;
@@ -162,13 +164,19 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         return this.onERC721Received.selector;
     }
 
+    /**
+     * @dev Opens a new PVP game
+     * @param _tokenid The ID of the NFT to be used in the game
+     */
     function openPVP(uint _tokenid) public payable nonReentrant {
 
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
         require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
-        
+        require(IERC721(directory.getNFT()).ownerOf(_tokenid) == _msgSender(), "E104");
         require(msg.value >= getOracleAmounts(minBet) && msg.value <= getOracleAmounts(maxBet), "E89");
 
+        require(userOpenGames[_msgSender()] < MAX_OPEN_GAMES_PER_USER, "E107");
+        
         _GameIds.increment();
         _openGames.increment();
 
@@ -214,17 +222,23 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
             sweepFees();
         }
 
+        userOpenGames[_msgSender()]++;
     }
 
+    /**
+     * @dev Allows a player to accept and join an existing PVP game
+     * @param _tokenid The ID of the NFT the accepting player wants to use
+     * @param _gameid The ID of the game to join
+     */
     function acceptPVP(uint _tokenid, uint _gameid) external payable nonReentrant {
 
         require(ITeazeFarm(directory.getFarm()).getUserStaked(_msgSender()), "E35");
         require(!ISimpCrates(directory.getCrates()).claimedNFT(_tokenid), "E97");
+        require(IERC721(directory.getNFT()).ownerOf(_tokenid) == _msgSender(), "E104");
 
         GameMaker storage gamemaker = gameMaker[_gameid];
         GameTaker storage gameresult = gameTaker[_gameid];
-        //TimeStamps storage timestamps = timeStamps[_gameid];
-
+        
         (uint nftid, uint packid,, uint mintClass,) = getPVPNFTinfo(_tokenid);
 
         require(msg.value >= getNFTdelta(mintClass, _gameid), "E89");
@@ -252,15 +266,22 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         uint usergames = userGames[_msgSender()];
 
-        userGameIDs[_msgSender()][usergames]= _gameid;
+        userGameIDs[_msgSender()][usergames] = _gameid;
 
         gamemaker.open = false;
+
+        userOpenGames[gamemaker.makerAddress]--;
 
         distributeOutcome(_gameid);
         closeGame(_gameid, true);
         
     }
 
+    /**
+     * @dev Calculates the strength parameters for an NFT
+     * @param _tokenid The ID of the NFT
+     * @return strength, strengthroll, and roll values
+     */
     function getStrength(uint _tokenid) internal view returns (uint, uint, uint) {
 
         uint packs = ITeazePacks(directory.getPacks()).getTotalPacks();
@@ -277,6 +298,10 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
+    /**
+     * @dev Calculates the weakness parameters for an NFT
+     * @return weakness and weaknessroll values
+     */
     function getWeakness() internal view returns (uint, uint) {
 
         (, string[] memory genus) = ITeazePacks(directory.getPacks()).getAllGenus();
@@ -317,42 +342,52 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
+    /**
+     * @dev Retrieves the maker's information for a specific game
+     * @param _gameId The ID of the game
+     * @param _hash A hash used for verification
+     * @return makerStrong The strength value of the maker's NFT
+     * @return makerStrongRoll The strength roll value of the maker's NFT
+     * @return makerWeak The weakness value of the maker's NFT
+     * @return makerWeakRoll The weakness roll value of the maker's NFT
+     * @return makerRoll The overall roll value of the maker's NFT
+     * @return sender The address of the sender (for verification purposes)
+     */
     function getMakerInfo(uint _gameId, bytes32 _hash) external view returns (
-        
         uint8 makerStrong,
         uint8 makerStrongRoll,
         uint8 makerWeak,
         uint8 makerWeakRoll,
         uint8 makerRoll,
         address sender
-        
     ) {
-
         GameMaker storage gamemaker = gameMaker[_gameId];
 
         bool matches = Inserter(directory.getInserter()).checkHash(gamemaker.makerAddress, _msgSender(), _hash);
 
         if (authorized[_msgSender()] || matches || gamemaker.open == false) {
-
             return (
-
                 gamemaker.makerStrong,
                 gamemaker.makerStrongRoll,
                 gamemaker.makerWeak,
                 gamemaker.makerWeakRoll,
                 gamemaker.makerRoll,
                 _msgSender()
-
             );
-
         } else {
-
             return(0,0,0,0,0,_msgSender());
         }
-
     }
 
+    /**
+     * @dev Calculates the BNB amount delta based on NFT rarity
+     * @param _mintClass The mint class of the taker's NFT
+     * @param _gameId The ID of the game
+     * @return _amount The calculated BNB amount
+     */
     function getNFTdelta(uint _mintClass, uint _gameId) public view returns (uint _amount) {
+
+        require(_gameId <= _GameIds.current(), "E110");
 
         GameMaker storage gamemaker = gameMaker[_gameId];
         uint amount;
@@ -363,23 +398,39 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         if(gamemaker.makerNFTratio > _mintClass) { //maker NFT higher rarity
             
-            return amount = uint(gamemaker.makerBNBamount).mul(uint(gamemaker.makerNFTratio).sub(_mintClass--)).mul(makerNFTnumerator).div(100);
+            amount = uint(gamemaker.makerBNBamount).mul(uint(gamemaker.makerNFTratio).sub(--_mintClass)).mul(makerNFTnumerator).div(100);
+            return amount;
         }
 
         if(gamemaker.makerNFTratio < _mintClass) { //maker NFT lower rarity
-            amount = uint(uint(gamemaker.makerBNBamount).mul(100).div(uint((_mintClass++).sub(gamemaker.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
+            amount = uint(uint(gamemaker.makerBNBamount).mul(100).div(uint((++_mintClass).sub(gamemaker.makerNFTratio)).mul(100))).mul(takerNFTnumerator).div(100);
             return amount.add(gameFee);
         }
 
+        revert("Unexpected mint class comparison");
+
     }
 
+    /**
+     * @dev Converts USD amounts to BNB using an oracle
+     * @param _usdamount The amount in USD
+     * @return amountusd The equivalent amount in BNB
+     */
     function getOracleAmounts(uint _usdamount) public view returns (uint amountusd) {
         uint bnbamount = IOracle(directory.getOracle()).getbnbusdequivalent(_usdamount);
         return bnbamount;
     }
 
+    /**
+     * @dev Retrieves information about an NFT
+     * @param _tokenID The ID of the NFT
+     * @return nftid The unique identifier of the NFT
+     * @return packid The ID of the pack the NFT belongs to
+     * @return mintPercent The minting percentage of the NFT
+     * @return mintClass The class or rarity of the NFT
+     * @return genus The genus or type of the NFT
+     */
     function getPVPNFTinfo(uint _tokenID) public view returns (uint, uint, uint, uint, string memory) {
-
         address packs = directory.getPacks();
 
         uint nftid = ITeazeNFT(directory.getNFT()).getNFTIDwithToken(_tokenID);
@@ -392,29 +443,33 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         return(nftid, packid, mintPercent, mintClass, genus);
     }
 
+
+    /**
+     * @dev Allows a player to delist their PVP game
+     * @param _gameId The ID of the game to delist
+     */
     function delistPVP(uint _gameId) external nonReentrant {
         GameMaker storage gamemaker = gameMaker[_gameId];
-        //GameTaker storage gameresult = gameTaker[_gameId];
         TimeStamps storage timestamps = timeStamps[_gameId];
 
-        if (gamemaker.open) {
-            require(gamemaker.makerAddress == _msgSender(), "E90");
-        } else {
-            return;
-        }
-
+        require(gamemaker.open, "E91");
+        require(gamemaker.makerAddress == _msgSender(), "E90");
         require(block.timestamp >= timestamps.timeExpires, "E96");
+
+        uint256 refundAmount = uint(gamemaker.makerBNBamount).sub(gameFee);
 
         gamemaker.open = false;
         timestamps.winner = "Expired";
         timestamps.makerClaimed = true;
+        totalFees = totalFees.add(gameFee);
 
-        payable(_msgSender()).transfer(uint(gamemaker.makerBNBamount).sub(gameFee));
-        IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gamemaker.makerTokenID);
+        userOpenGames[gamemaker.makerAddress]--;
 
         closeGame(_gameId, false);
 
-        totalFees = totalFees.add(gameFee);
+        IERC721(directory.getNFT()).safeTransferFrom(address(this), _msgSender(), gamemaker.makerTokenID);
+        payable(_msgSender()).transfer(refundAmount);
+
     }
 
     function changeMinMaxBet(uint _min, uint _max) external onlyAuthorized {
@@ -506,6 +561,10 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
     }
 
+    /**
+     * @dev Distributes the outcome of a completed game
+     * @param _gameid The ID of the completed game
+     */
     function distributeOutcome(uint _gameid) internal {
 
         GameMaker storage gamemaker = gameMaker[_gameid];
@@ -580,18 +639,25 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
         } 
 
+
     }
 
-    function claimWinnings(uint _gameid) external {
+    /**
+     * @dev Allows winners to claim their winnings from a game
+     * @param _gameid The ID of the game to claim winnings from
+     */
+    function claimWinnings(uint _gameid) external nonReentrant {
 
         GameMaker storage gamemaker = gameMaker[_gameid];
         GameTaker storage gameresult = gameTaker[_gameid];
         TimeStamps storage timestamps = timeStamps[_gameid];
 
         require(_msgSender() == gamemaker.makerAddress || _msgSender() == gameresult.takerAddress, "E103");
-
+        require(!gamemaker.open, "E109");
+     
+        
         if(_msgSender() == gamemaker.makerAddress && timestamps._winner == DEAD) {
-            require(!timestamps.makerClaimed, "E104");
+            require(!timestamps.makerClaimed, "E108");
 
             IERC721(directory.getNFT()).safeTransferFrom(address(this), gamemaker.makerAddress, gamemaker.makerTokenID);
 
@@ -605,7 +671,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         }
 
         if(_msgSender() == gameresult.takerAddress && timestamps._winner == DEAD) {
-            require(!timestamps.takerClaimed, "E104");
+            require(!timestamps.takerClaimed, "E108");
 
             if(timestamps.takerFinalAmt > 0) {
                 payable(_msgSender()).transfer(timestamps.takerFinalAmt);
@@ -617,7 +683,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         }
 
         if(_msgSender() == gamemaker.makerAddress && timestamps._winner == _msgSender()) {
-            require(!timestamps.makerClaimed, "E104");
+            require(!timestamps.makerClaimed, "E108");
 
             if(timestamps.makerFinalAmt > 0) {
                 payable(_msgSender()).transfer(timestamps.makerFinalAmt);
@@ -633,7 +699,7 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
         }
 
         if(_msgSender() == gameresult.takerAddress && timestamps._winner == _msgSender()) {
-            require(!timestamps.takerClaimed, "E104");
+            require(!timestamps.takerClaimed, "E108");
 
             if(timestamps.takerFinalAmt > 0) {
                 payable(_msgSender()).transfer(timestamps.takerFinalAmt);
@@ -651,38 +717,37 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
 
 
 
-    function closeGame(uint256 _gameId, bool status) internal { //change to internal for production
+    /**
+     * @dev Closes a game and updates relevant arrays and counters
+     * @param _gameId The ID of the game to close
+     * @param status Whether the game was completed (true) or expired (false)
+     */
+    function closeGame(uint256 _gameId, bool status) internal {
         uint arraylength = opengamearray.length;
+        bool found = false;
 
-        //Remove open game from active array
         for(uint x = 0; x < arraylength; x++) {
             if (opengamearray[x] == _gameId) {
                 opengamearray[x] = opengamearray[arraylength-1];
                 opengamearray.pop();
-
-                if(_openGames.current() > 0) {
-                    _openGames.decrement();
-                }
-
-                //Add open game to closed (true) or expired (false) array
-                if (status) {
- 
-                    closedgamearray.push(_gameId);
-
-                    _closedGames.increment();
-
-                } else {
-
-                    expiredgamearray.push(_gameId);
-
-                    _expiredGames.increment();
-
-                }
-              
-                return;
+                found = true;
+                break;
             }
-        }       
+        }
 
+        require(found, "E110");
+
+        if(_openGames.current() > 0) {
+            _openGames.decrement();
+        }
+
+        if (status) {
+            closedgamearray.push(_gameId);
+            _closedGames.increment();
+        } else {
+            expiredgamearray.push(_gameId);
+            _expiredGames.increment();
+        }
     }
 
     function viewopenGames() external view returns (uint256[] memory opengames){
@@ -758,5 +823,11 @@ contract TeazePVP is Ownable, Authorizable, Whitelisted, IERC721Receiver, Reentr
             payable(directory.getCrates()).transfer(totalFees.mul(50).div(100));
             totalFees = 0;
         }         
+    }
+
+    function setMaxOpenGamesPerUser(uint8 _newMax) external onlyAuthorized {
+        require(_newMax > 0, "E105");
+        require(_newMax <= 10, "E106");
+        MAX_OPEN_GAMES_PER_USER = _newMax;
     }
 }
